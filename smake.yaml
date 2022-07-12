@@ -1,13 +1,13 @@
 builds:
   - main:
-    - sources: 'main.c, glad/src/glad.c'
-    - idirs: '., glad/include'
+    - sources: 'main.cpp, glad/src/glad.c'
+    - idirs: '., glad/include, thirdparty, thirdparty/glm'
     - libraries: 'glfw'
   - main_gdb:
-    - sources: 'main.c, glad/src/glad.c'
-    - idirs: '., glad/include'
+    - sources: 'main.cpp, glad/src/glad.c'
+    - idirs: '., glad/include, thirdparty, thirdparty/glm'
     - libraries: 'glfw'
-    - flags: '-Og'
+    - flags: '-g'
 
 targets:
   - main:

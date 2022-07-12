@@ -3,9 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <iostream>
+
 // GLFW and GLAD
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+
+// GLM headers
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 static char *read_file(const char *path)
 {
@@ -86,11 +93,18 @@ static int link_program(unsigned int program)
 	return 1;
 }
 
-static int set_int(unsigned int program, const char *name, int value)
+static void set_int(unsigned int program, const char *name, int value)
 {
 	glUseProgram(program);
-	glUniform1i(glGetUniformLocation(program, name), value);
-	return 1;
+	int i = glGetUniformLocation(program, name);
+	glUniform1i(i, value);
+}
+
+static void set_vec3(unsigned int program, const char *name, const glm::vec3 &vec)
+{
+	glUseProgram(program);
+	int i = glGetUniformLocation(program, name);
+	glUniform3fv(i, 1, glm::value_ptr(vec));
 }
 
 int main()
@@ -154,9 +168,29 @@ int main()
 	// Delete shaders
 	glDeleteShader(shader);
 
-	set_int(program, "width", WIDTH);
-	set_int(program, "height", HEIGHT);
-	set_int(program, "pixel", PIXEL_SIZE);
+	glm::vec3 origin {0, 0, -5};
+	glm::vec3 lookat {0, 0, 0};
+	glm::vec3 up {0, 1, 0};
+
+	auto setup_camera = [program](const glm::vec3 &origin, const glm::vec3 &lookat, const glm::vec3 &up_) {
+		glm::vec3 a = lookat - origin;
+		glm::vec3 b = up_;
+
+		glm::vec3 front = glm::normalize(a);
+		glm::vec3 right = glm::normalize(glm::cross(b, front));
+		glm::vec3 up = glm::cross(front, right);
+
+		set_int(program, "width", WIDTH);
+		set_int(program, "height", HEIGHT);
+		set_int(program, "pixel", PIXEL_SIZE);
+
+		set_vec3(program, "camera.origin", origin);
+		set_vec3(program, "camera.front", front);
+		set_vec3(program, "camera.up", up);
+		set_vec3(program, "camera.right", right);
+	};
+
+	setup_camera(origin, lookat, up);
 
 	// Set up vertex data
 	float vertices[] = {
@@ -202,6 +236,8 @@ int main()
 		return -1;
 
 	// Loop until the user closes the window
+	float last_time = glfwGetTime();
+
 	while (!glfwWindowShouldClose(window)) {
 		// Close if escape or q
 		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
@@ -209,6 +245,11 @@ int main()
 			glfwSetWindowShouldClose(window, GL_TRUE);
 			continue;
 		}
+
+		// Update
+		float t = glfwGetTime();
+		origin = glm::vec3 {cos(t) * 5, sin(t) * 5, sin(t) * 5};
+		setup_camera(origin, lookat, up);
 
 		// Ray tracing
 		{
@@ -233,5 +274,12 @@ int main()
 
 		// Poll for and process events
 		glfwPollEvents();
+
+		// Print frame-time
+		// TODO: set frame rate to 24 fps
+		float current_time = glfwGetTime();
+		float fps = 1.0f / (current_time - last_time);
+		// printf("%f, fps: %f\n", current_time - last_time, fps);
+		last_time = current_time;
 	}
 }
