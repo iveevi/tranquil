@@ -3,10 +3,18 @@ builds:
     - sources: 'main.c, glad/src/glad.c'
     - idirs: '., glad/include'
     - libraries: 'glfw'
+  - main_gdb:
+    - sources: 'main.c, glad/src/glad.c'
+    - idirs: '., glad/include'
+    - libraries: 'glfw'
+    - flags: '-Og'
 
 targets:
   - main:
+    - modes: gdb
     - builds:
       - default: main
+      - gdb: main_gdb
     - postbuilds:
       - default: '{}'
+      - gdb: 'gdb {}'
