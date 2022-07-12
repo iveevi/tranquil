@@ -1,0 +1,12 @@
+builds:
+  - main:
+    - sources: 'main.c, glad/src/glad.c'
+    - idirs: '., glad/include'
+    - libraries: 'glfw'
+
+targets:
+  - main:
+    - builds:
+      - default: main
+    - postbuilds:
+      - default: '{}'
