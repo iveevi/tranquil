@@ -1,118 +1,319 @@
-// Standard headers
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "common.hpp"
 
-#include <iostream>
+// Aligned types
+struct alignas(16) aligned_vec4 {
+	glm::vec4 v;
 
-// GLFW and GLAD
-#include <glad/glad.h>
-#include <GLFW/glfw3.h>
+	aligned_vec4() : v(glm::vec4(0.0f)) {}
+	aligned_vec4(const glm::vec3 &v) : v(glm::vec4(v, 0.0f)) {}
+	aligned_vec4(const glm::vec4 &v) : v(v) {}
+};
 
-// GLM headers
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
+// Acceleration structure
+struct BBox {
+	glm::vec3 min;
+	glm::vec3 max;
 
-static char *read_file(const char *path)
-{
-	char *source;
-	FILE *fp = fopen(path, "r");
-	if (!fp) {
-		printf("Failed to open shader source\n");
-		return NULL;
+	float surface_area() const {
+		glm::vec3 size = max - min;
+		return 2.0f * (size.x * size.y + size.x * size.z + size.y * size.z);
+	}
+};
+
+struct BVH {
+	BBox bbox;
+	BVH *left = nullptr;
+	BVH *right = nullptr;
+
+	BVH(const BBox &bbox_) : bbox(bbox_) {}
+
+	~BVH() {
+		if (left) delete left;
+		if (right) delete right;
 	}
 
-	// Get file size
-	fseek(fp, 0, SEEK_END);
+	void print(int indentation = 0) {
+		std::string ident(2 * indentation, ' ');
+		std::cout << ident << "BVH: " << glm::to_string(bbox.min)
+			<< " -> " << glm::to_string(bbox.max) << std::endl;
+		if (left) left->print(indentation + 1);
+		if (right) right->print(indentation + 1);
+	}
+};
 
-	// Allocate memory for shader source
-	long size = ftell(fp);
-	source = (char *) malloc(size + 1);
+// Union bounding boxes
+BBox union_of(const std::vector <BVH *> &nodes) {
+	glm::vec3 min = nodes[0]->bbox.min;
+	glm::vec3 max = nodes[0]->bbox.max;
 
-	// Rewind file pointer
-	fseek(fp, 0, SEEK_SET);
-
-	// Read shader source
-	fread(source, 1, size, fp);
-	source[size] = '\0';
-
-	// Close file
-	fclose(fp);
-
-	return source;
-}
-
-static unsigned int compile_shader(const char *path, unsigned int type)
-{
-	char *source = read_file(path);
-	if (!source) {
-		printf("Failed to read shader source\n");
-		return 0;
+	for (int i = 1; i < nodes.size(); i++) {
+		min = glm::min(min, nodes[i]->bbox.min);
+		max = glm::max(max, nodes[i]->bbox.max);
 	}
 
-	unsigned int shader = glCreateShader(type);
-	glShaderSource(shader, 1, &source, NULL);
-	glCompileShader(shader);
+	return BBox{min, max};
+}
 
-	// Check for errors
-	int success;
-	char info_log[512];
+float cost_split(const std::vector <BVH *> &nodes, float split, int axis) {
+	float cost = 0.0f;
 
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+	glm::vec3 min_left = glm::vec3(std::numeric_limits <float> ::max());
+	glm::vec3 max_left = glm::vec3(-std::numeric_limits <float> ::max());
 
-	if (!success) {
-		glGetShaderInfoLog(shader, 512, NULL, info_log);
-		printf("Failed to compile shader (%s):\n%s\n", path, info_log);
-		free(source);
-		return 0;
+	glm::vec3 min_right = glm::vec3(std::numeric_limits <float> ::max());
+	glm::vec3 max_right = glm::vec3(-std::numeric_limits <float> ::max());
+
+	glm::vec3 tmin = nodes[0]->bbox.min;
+	glm::vec3 tmax = nodes[0]->bbox.max;
+
+	int prims_left = 0;
+	int prims_right = 0;
+
+	for (BVH *node : nodes) {
+		glm::vec3 min = node->bbox.min;
+		glm::vec3 max = node->bbox.max;
+
+		tmin = glm::min(tmin, min);
+		tmax = glm::max(tmax, max);
+
+		float value = (min[axis] + max[axis]) / 2.0f;
+
+		if (value < split) {
+			// Left
+			prims_left++;
+
+			min_left = glm::min(min_left, min);
+			max_left = glm::max(max_left, max);
+		} else {
+			// Right
+			prims_right++;
+
+			min_right = glm::min(min_right, min);
+			max_right = glm::max(max_right, max);
+		}
 	}
 
-	free(source);
+	// Max cost when all primitives are in one side
+	if (prims_left == 0 || prims_right == 0)
+		return std::numeric_limits <float> ::max();
 
-	printf("Successfully compiled shader %s\n", path);
-	return shader;
+	// Compute cost
+	float sa_left = BBox {min_left, max_left}.surface_area();
+	float sa_right = BBox {min_right, max_right}.surface_area();
+	float sa_total = BBox {tmin, tmax}.surface_area();
+
+	return 1 + (prims_left * sa_left + prims_right * sa_right) / sa_total;
 }
 
-static int link_program(unsigned int program)
-{
-	int success;
-	char info_log[512];
+BVH *partition(std::vector <BVH *> &nodes) {
+	// Base cases
+	if (nodes.size() == 0)
+		return nullptr;
 
-	glLinkProgram(program);
+	if (nodes.size() == 1)
+		return nodes[0];
 
-	// Check if program linked successfully
-	glGetProgramiv(program, GL_LINK_STATUS, &success);
-
-	if (!success) {
-		glGetProgramInfoLog(program, 512, NULL, info_log);
-		printf("Failed to link program: %s\n", info_log);
-		return 0;
+	if (nodes.size() == 2) {
+		BVH *node = new BVH(union_of(nodes));
+		node->left = nodes[0];
+		node->right = nodes[1];
+		return node;
 	}
 
-	return 1;
+	// Get axis with largest extent
+	int axis = 0;
+	float max_extent = 0.0f;
+
+	float min_value = std::numeric_limits <float> ::max();
+	float max_value = -std::numeric_limits <float> ::max();
+
+	for (size_t n = 0; n < nodes.size(); n++) {
+		for (int i = 0; i < 3; i++) {
+			glm::vec3 min = nodes[n]->bbox.min;
+			glm::vec3 max = nodes[n]->bbox.max;
+
+			float extent = std::abs(max[i] - min[i]);
+			if (extent > max_extent) {
+				max_extent = extent;
+				min_value = min[i];
+				max_value = max[i];
+				axis = i;
+			}
+		}
+	}
+
+	// Binary search optimal partition (using SAH)
+	float min_cost = std::numeric_limits <float> ::max();
+	float min_split = 0.0f;
+	int bins = 10;
+
+	for (int i = 0; i < bins; i++) {
+		float split = (max_value - min_value) / bins * i + min_value;
+		float cost = cost_split(nodes, split, axis);
+
+		if (cost < min_cost) {
+			min_cost = cost;
+			min_split = split;
+		}
+	}
+
+	std::vector <BVH *> left;
+	std::vector <BVH *> right;
+
+	if (min_cost == std::numeric_limits <float> ::max()) {
+		// Partition evenly
+		for (int i = 0; i < nodes.size(); i++) {
+			if (i % 2 == 0)
+				left.push_back(nodes[i]);
+			else
+				right.push_back(nodes[i]);
+		}
+	} else {
+		// Centroid partition with optimal split
+		for (BVH *node : nodes) {
+			glm::vec3 min = node->bbox.min;
+			glm::vec3 max = node->bbox.max;
+
+			float value = (min[axis] + max[axis]) / 2.0f;
+
+			if (value < min_split)
+				left.push_back(node);
+			else
+				right.push_back(node);
+		}
+	}
+
+	// Create left and right nodes
+	BBox bbox = union_of(nodes);
+	BVH *left_node = partition(left);
+	BVH *right_node = partition(right);
+
+	BVH *node = new BVH(bbox);
+	node->left = left_node;
+	node->right = right_node;
+
+	return node;
 }
 
-static void set_int(unsigned int program, const char *name, int value)
+// TODO: add info about normals
+// TODO: use indices and another vertex structure
+struct Vertex {
+	glm::vec3 position;
+};
+
+using VBuffer = std::vector <aligned_vec4>;
+using IBuffer = std::vector <unsigned int>;
+
+struct Mesh {
+	std::vector <Vertex> vertices;
+	std::vector <uint32_t> indices;
+
+	// Serialize mesh vertices and indices to buffers
+	void serialize_vertices(VBuffer &vbuffer) const {
+		vbuffer.reserve(vertices.size());
+		for (const auto &v : vertices)
+			vbuffer.push_back(aligned_vec4(v.position));
+	}
+
+	void serialize_indices(IBuffer &ibuffer) const {
+		ibuffer.reserve(indices.size());
+		for (const auto &i : indices)
+			ibuffer.push_back(i);
+	}
+
+	// Make BVH
+	BVH *make_bvh() {
+		std::vector <BVH *> nodes;
+		nodes.reserve(indices.size());
+
+		for (size_t i = 0; i < indices.size(); i += 3) {
+			glm::vec3 min = vertices[indices[i]].position;
+			glm::vec3 max = vertices[indices[i]].position;
+
+			for (int j = 1; j < 3; j++) {
+				min = glm::min(min, vertices[indices[i + j]].position);
+				max = glm::max(max, vertices[indices[i + j]].position);
+			}
+
+			nodes.push_back(new BVH(BBox {min, max}));
+		}
+
+		return partition(nodes);
+	}
+
+	size_t triangles() const {
+		return indices.size() / 3;
+	}
+};
+
+float randf()
 {
-	glUseProgram(program);
-	int i = glGetUniformLocation(program, name);
-	glUniform1i(i, value);
+	return (float) rand() / (float) RAND_MAX;
 }
 
-static void set_vec3(unsigned int program, const char *name, const glm::vec3 &vec)
+// Generate terrain tile mesh
+Mesh generate_tile()
 {
-	glUseProgram(program);
-	int i = glGetUniformLocation(program, name);
-	glUniform3fv(i, 1, glm::value_ptr(vec));
+	float width = 10.0f;
+	float height = 10.0f;
+
+	size_t resolution = 2;
+
+	// Height map
+	size_t mapres = resolution + 1;
+	std::vector <float> height_map(mapres * mapres);
+
+	srand(clock());
+	for (size_t i = 0; i < mapres * mapres; i++)
+		height_map[i] = randf() * 1.0f;
+
+	float slice = width/resolution;
+
+	float x = -width/2.0f;
+	float z = -height/2.0f;
+
+	Mesh tile;
+	for (int i = 0; i <= resolution; i++) {
+		for (int j = 0; j <= resolution; j++) {
+			Vertex vertex;
+			vertex.position = glm::vec3(x, height_map[i * resolution + j], z);
+			tile.vertices.push_back(vertex);
+			x += slice;
+		}
+
+		x = -width/2.0f;
+		z += slice;
+	}
+
+	// Generate indices
+	for (int i = 0; i < resolution; i++) {
+		for (int j = 0; j < resolution; j++) {
+			// Indices of square
+			uint32_t a = i * (resolution + 1) + j;
+			uint32_t b = (i + 1) * (resolution + 1) + j;
+			uint32_t c = (i + 1) * (resolution + 1) + j + 1;
+			uint32_t d = i * (resolution + 1) + j + 1;
+
+			// Push
+			tile.indices.push_back(a);
+			tile.indices.push_back(b);
+			tile.indices.push_back(c);
+
+			tile.indices.push_back(a);
+			tile.indices.push_back(c);
+			tile.indices.push_back(d);
+		}
+	}
+
+	std::cout << "Vertices: " << tile.vertices.size() << std::endl;
+	for (const auto &v : tile.vertices)
+		std::cout << glm::to_string(v.position) << std::endl;
+
+	return tile;
 }
 
 int main()
 {
-	const int WIDTH = 800;
-	const int HEIGHT = 600;
-	const int PIXEL_SIZE = 4;
-
 	// Basic window
 	GLFWwindow *window = NULL;
 	if (!glfwInit())
@@ -134,6 +335,9 @@ int main()
 		printf("Failed to initialize OpenGL context\n");
 		return -1;
 	}
+
+	const GLubyte* renderer = glGetString(GL_RENDERER);
+	printf("Renderer: %s\n", renderer);
 
 	// Create texture for output
 	unsigned int texture;
@@ -193,7 +397,7 @@ int main()
 	setup_camera(origin, lookat, up);
 
 	// Set up vertex data
-	float vertices[] = {
+	float vs[] = {
 		// positions		// texture coords
 		-1.0f,	-1.0f,	0.0f,	0.0f,	0.0f,
 		1.0f,	-1.0f,	0.0f,	1.0f,	0.0f,
@@ -214,7 +418,7 @@ int main()
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
 	// Upload vertex data
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vs), vs, GL_STATIC_DRAW);
 
 	// Set up vertex attributes
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) 0);
@@ -235,6 +439,39 @@ int main()
 	if (!link_program(program_texture))
 		return -1;
 
+	// Vertices of tile
+	Mesh tile = generate_tile();
+
+	BVH *bvh = tile.make_bvh();
+	bvh->print();
+	delete bvh;
+
+	VBuffer vertices;
+	IBuffer indices;
+
+	tile.serialize_vertices(vertices);
+	tile.serialize_indices(indices);
+
+	// Create storage buffer for tile vertices
+	unsigned int ssbo;
+
+	// Create storage buffer object
+	glGenBuffers(1, &ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(aligned_vec4) * vertices.size(), vertices.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 1);
+
+	// Create storage buffer for tile indices
+	unsigned int issbo;
+
+	// Create storage buffer object
+	glGenBuffers(1, &issbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, issbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(unsigned int) * indices.size(), indices.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 2);
+
+	set_int(program, "primitives", tile.triangles());
+
 	// Loop until the user closes the window
 	float last_time = glfwGetTime();
 
@@ -248,13 +485,19 @@ int main()
 
 		// Update
 		float t = glfwGetTime();
-		origin = glm::vec3 {cos(t) * 5, sin(t) * 5, sin(t) * 5};
+		// origin = glm::vec3 {cos(t) * 5, sin(t) * 5, sin(t) * 5};
+		t /= 2;
+
+		float radius = 10;
+		origin = glm::vec3 {cos(t) * radius, 5, sin(t) * radius};
 		setup_camera(origin, lookat, up);
 
 		// Ray tracing
 		{
 			// Bind program and dispatch
 			glUseProgram(program);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, issbo);
 			glDispatchCompute(WIDTH/PIXEL_SIZE, HEIGHT/PIXEL_SIZE, 1);
 		}
 
