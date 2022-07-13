@@ -1,28 +1,6 @@
 #version 430
 
-layout (local_size_x = 1, local_size_y = 1) in;
-
-layout (rgba32f, binding = 0) uniform image2D image;
-
-layout (std430, binding = 1) buffer Vertices {
-	vec4 data[];
-} vertices;
-
-layout (std430, binding = 2) buffer Triangles {
-	uint data[];
-} triangles;
-
-layout (std430, binding = 3) buffer BVH {
-	vec4 data[];
-} bvh;
-
-uniform int width;
-uniform int height;
-uniform int pixel;
-uniform int primitives;
-
-float fov = 45.0f;
-
+// Structures
 struct Ray {
 	vec3 p;
 	vec3 d;
@@ -35,12 +13,63 @@ struct Camera {
 	vec3 right;
 };
 
+struct Triangle {
+	vec3 v1;
+	vec3 v2;
+	vec3 v3;
+};
+
+struct Intersection {
+	float t;
+	vec3 p;
+	vec3 n;
+	int id;
+	uint shading;
+};
+
+struct BoundingBox {
+	vec3 pmin;
+	vec3 pmax;
+};
+
+// Shader program inputs
+layout (local_size_x = 1, local_size_y = 1) in;
+
+layout (rgba32f, binding = 0) uniform image2D image;
+
+layout (std430, binding = 1) buffer Vertices {
+	vec4 data[];
+} vertices;
+
+layout (std430, binding = 2) buffer Triangles {
+	uvec4 data[];
+} triangles;
+
+layout (std430, binding = 3) buffer BVH {
+	vec4 data[];
+} bvh;
+
+uniform int width;
+uniform int height;
+uniform int pixel;
+uniform int primitives;
+
 uniform Camera camera;
 
+// Constants
+const float PI = 3.14159265358979323846f;
+const float fov = 45.0f;
+
+// Shading constants
+uint eNone = 0;
+uint eWater = 1;
+uint eGrass = 2;
+uint ePillar = 3;
+
 // Ray generation
-Ray gen_ray(vec2 uv)
+Ray generate_ray(vec2 uv)
 {
-	float rad_fov = fov * 3.1415926535897932384626433832795 / 180.0f;
+	float rad_fov = fov * PI/180.0f;
 	float scale = tan(rad_fov * 0.5f);
 	float aspect = float(width) / float(height);
 
@@ -51,34 +80,6 @@ Ray gen_ray(vec2 uv)
 }
 
 // Shapes and intersection
-struct Sphere {
-	vec3 center;
-	float radius;
-};
-
-float _intersect_time(Ray r, Sphere s)
-{
-	vec3 oc = r.p - s.center;
-	float a = dot(r.d, r.d);
-	float b = 2.0 * dot(oc, r.d);
-	float c = dot(oc, oc) - s.radius * s.radius;
-	float d = b * b - 4.0 * a * c;
-
-	if (d < 0.0)
-		return -1.0;
-
-	float t1 = (-b - sqrt(d)) / (2.0 * a);
-	float t2 = (-b + sqrt(d)) / (2.0 * a);
-
-	return min(t1, t2);
-}
-
-struct Triangle {
-	vec3 v1;
-	vec3 v2;
-	vec3 v3;
-};
-
 float _intersect_time(Ray r, Triangle t)
 {
 	vec3 e1 = t.v2 - t.v1;
@@ -100,32 +101,32 @@ float _intersect_time(Ray r, Triangle t)
 	return time;
 }
 
-struct Intersection {
-	float t;
-	vec3 p;
-	vec3 n;
-	int id;
-};
+// Generate default intersection
+Intersection def_it()
+{
+	return Intersection(1.0/0.0, vec3(0.0), vec3(0.0), -1, eNone);
+}
 
-Intersection _intersect(Ray r, Triangle tri)
+Intersection _intersect(Ray r, Triangle tri, uint shading)
 {
 	float t = _intersect_time(r, tri);
 	if (t < 0.0)
-		return Intersection(-1, vec3(0.0), vec3(0.0), -1);
+		return def_it();
 	vec3 p = r.p + r.d * t;
 	vec3 e1 = tri.v2 - tri.v1;
 	vec3 e2 = tri.v3 - tri.v1;
 	vec3 n = -cross(e1, e2);
 	if (dot(n, r.d) > 0.0)
 		n = -n;
-	return Intersection(t, p, normalize(n), 0);
+	return Intersection(t, p, normalize(n), 0, shading);
 }
 
 Intersection intersect(Ray r, int i)
 {
-	uint a = triangles.data[i * 3];
-	uint b = triangles.data[i * 3 + 1];
-	uint c = triangles.data[i * 3 + 2];
+	uvec4 tri = triangles.data[i];
+	uint a = tri.x;
+	uint b = tri.y;
+	uint c = tri.z;
 
 	Triangle t = Triangle(
 		vertices.data[a].xyz,
@@ -133,7 +134,7 @@ Intersection intersect(Ray r, int i)
 		vertices.data[c].xyz
 	);
 
-	return  _intersect(r, t);
+	return  _intersect(r, t, tri.w);
 }
 
 // Get left and right child of the node
@@ -154,12 +155,6 @@ int miss(int node)
 	vec4 prop = bvh.data[node];
 	return floatBitsToInt(prop.z);
 }
-
-// Bounding box
-struct BoundingBox {
-	vec3 pmin;
-	vec3 pmax;
-};
 
 // Intersect bounding box
 // TODO: optimize or shorten this function
@@ -219,7 +214,6 @@ bool in_box(vec3 point, BoundingBox box)
 {
 	bvec3 lt = lessThan(point, box.pmin);
 	bvec3 gt = greaterThan(point, box.pmax);
-
 	return !(any(lt) || any(gt));
 }
 
@@ -233,7 +227,7 @@ BoundingBox bbox(int node)
 Intersection trace(Ray ray)
 {
 	// "Min" intersection
-	Intersection mini = Intersection(1.0/0.0, vec3(0.0), vec3(0.0), -1);
+	Intersection mini = def_it();
 
 	// Traverse BVH as a threaded binary tree
 	int node = 0;
@@ -260,18 +254,73 @@ Intersection trace(Ray ray)
 			float t = intersect_box(ray, box);
 			bool inside = in_box(ray.p, box);
 
-			if ((t > 0.0 && t < mini.t) || inside) {
-				// Traverse left child
+			if ((t > 0.0 && t < mini.t) || inside)
 				node = hit(node);
-			} else {
-				// Traverse right child
+			else
 				node = miss(node);
-			}
 		}
 	}
 
 	// Return intersection
 	return mini;
+}
+
+void get_base(uint shading, out vec3 Kd, out vec3 Ks, inout bool valid)
+{
+	if (shading == eGrass) {
+		Kd = vec3(0.5, 1, 0.5);
+		Ks = vec3(0, 0, 0);
+	} else if (shading == ePillar) {
+		Kd = vec3(0.5, 0.5, 0.5);
+		Ks = vec3(0.5, 0.5, 0.5);
+	} else {
+		valid = false;
+		Kd = vec3(1, 0, 1);
+	}
+}
+
+float vec_min(vec3 v)
+{
+	return min(min(v.x, v.y), v.z);
+}
+
+float vec_max(vec3 v)
+{
+	return max(max(v.x, v.y), v.z);
+}
+
+float quantize(float v, float b)
+{
+	return floor(v * b) / b;
+}
+
+vec4 shade(Intersection it)
+{
+	bool valid = true;
+
+	vec3 Kd = vec3(0, 0, 0);
+	vec3 Ks = vec3(0, 0, 0);
+
+	get_base(it.shading, Kd, Ks, valid);
+	if (!valid)
+		return vec4(Kd, 1);
+
+	// Directional light
+	vec3 light = normalize(vec3(1, 1, 1));
+	vec3 normal = normalize(it.n);
+	vec3 view = normalize(camera.origin - it.p);
+	vec3 whalf = normalize(light + view);
+
+	float ndotl = max(dot(normal, light), 0.0);
+	float ndoth = max(dot(normal, whalf), 0.0);
+	float pf = pow(ndoth, 32.0);
+
+	vec3 diffuse = Kd * ndotl;
+	vec3 specular = 0.1 * Ks  * pf;
+	vec3 ambient = Kd * 0.25f;
+	vec3 color = diffuse + specular + ambient;
+
+	return vec4(color, 1);
 }
 
 void main()
@@ -281,33 +330,21 @@ void main()
 	vec2 uv = vec2(coord) + vec2(pixel/2.0f);
 	uv /= vec2(width, height);
 
-	Ray r = gen_ray(uv);
+	Ray r = generate_ray(uv);
 	Intersection it = trace(r);
 
 	// If no hit, then some blue gradient
 	vec4 color = vec4(0.7, 0.7, dot(r.d, camera.front), 1.0);
-	if (it.id != -1) {
-		color = vec4(0, 0, 1, 1);
-
-
-		// Directional light
-		vec3 light = normalize(vec3(1, 1, 1));
-		vec3 normal = normalize(it.n);
-		vec3 view = normalize(camera.origin - it.p);
-		vec3 whalf = normalize(light + view);
-
-		float ndotl = max(dot(normal, light), 0.0);
-		float ndoth = max(dot(normal, whalf), 0.0);
-		float pf = pow(ndoth, 32.0);
-
-		vec3 diffuse = vec3(0.5, 1, 0.5) * ndotl;
-		vec3 specular = 0.25 * vec3(1, 1, 1) * pf;
-		color = vec4(diffuse + specular, 1.0);
-	}
+	if (it.id != -1)
+		color = shade(it);
 
 	// Set same color to all pixels
 	for (int i = 0; i < pixel; i++) {
-		for (int j = 0; j < pixel; j++)
-			imageStore(image, ivec2(coord.x + i, coord.y + j), color);
+		for (int j = 0; j < pixel; j++) {
+			imageStore(image,
+				ivec2(coord.x + i, coord.y + j),
+				clamp(color, 0.0, 1.0)
+			);
+		}
 	}
 }

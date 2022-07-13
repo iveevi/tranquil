@@ -1,6 +1,6 @@
 builds:
   - main:
-    - sources: 'main.cpp, glad/src/glad.c'
+    - sources: 'main.cpp, glad/src/glad.c, opengl.cpp'
     - idirs: '., glad/include, thirdparty, thirdparty/glm'
     - libraries: 'glfw'
   - main_gdb:

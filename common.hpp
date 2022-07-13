@@ -20,9 +20,24 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
+// App headers
+#include "bvh.hpp"
+#include "core.hpp"
+#include "shades.hpp"
+
 const int WIDTH = 800;
 const int HEIGHT = 600;
 const int PIXEL_SIZE = 4;
+
+inline float randf()
+{
+	return (float) rand() / (float) RAND_MAX;
+}
+
+inline float randf(float min, float max)
+{
+	return randf() * (max - min) + min;
+}
 
 inline char *read_file(const char *path)
 {
@@ -53,68 +68,121 @@ inline char *read_file(const char *path)
 	return source;
 }
 
-inline unsigned int compile_shader(const char *path, unsigned int type)
-{
-	char *source = read_file(path);
-	if (!source) {
-		printf("Failed to read shader source\n");
-		return 0;
+int compile_shader(const char *, unsigned int);
+int link_program(unsigned int);
+void set_int(unsigned int, const char *, int);
+void set_vec3(unsigned int, const char *, const glm::vec3 &);
+
+// TODO: add info about normals
+// TODO: use indices and another vertex structure
+struct Vertex {
+	glm::vec3 position;
+};
+
+struct Triangle {
+	uint32_t v1, v2, v3;
+	Shades shade = Shades::eNone;
+
+	Triangle(uint32_t v1, uint32_t v2, uint32_t v3)
+			: v1(v1), v2(v2), v3(v3) {}
+
+	Triangle(uint32_t v1, uint32_t v2, uint32_t v3, Shades shade)
+			: v1(v1), v2(v2), v3(v3), shade(shade) {}
+};
+
+using VBuffer = std::vector <aligned_vec4>;
+using IBuffer = std::vector <aligned_uvec4>;
+
+struct Mesh {
+	std::vector <Vertex> vertices;
+	std::vector <Triangle> triangles;
+
+	// Add another mesh to this mesh
+	void add(const Mesh &mesh) {
+		int size = vertices.size();
+		vertices.insert(vertices.end(),
+			mesh.vertices.begin(),
+			mesh.vertices.end()
+		);
+
+		// Need to reindex indices
+		for (auto &triangle : mesh.triangles) {
+			triangles.push_back({
+				triangle.v1 + size,
+				triangle.v2 + size,
+				triangle.v3 + size,
+				triangle.shade
+			});
+		}
 	}
 
-	unsigned int shader = glCreateShader(type);
-	glShaderSource(shader, 1, &source, NULL);
-	glCompileShader(shader);
-
-	// Check for errors
-	int success;
-	char info_log[512];
-
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-
-	if (!success) {
-		glGetShaderInfoLog(shader, 512, NULL, info_log);
-		printf("Failed to compile shader (%s):\n%s\n", path, info_log);
-		free(source);
-		return 0;
+	// Serialize mesh vertices and indices to buffers
+	void serialize_vertices(VBuffer &vbuffer) const {
+		vbuffer.reserve(vertices.size());
+		for (const auto &v : vertices)
+			vbuffer.push_back(aligned_vec4(v.position));
 	}
 
-	free(source);
-
-	printf("Successfully compiled shader %s\n", path);
-	return shader;
-}
-
-inline int link_program(unsigned int program)
-{
-	int success;
-	char info_log[512];
-
-	glLinkProgram(program);
-
-	// Check if program linked successfully
-	glGetProgramiv(program, GL_LINK_STATUS, &success);
-
-	if (!success) {
-		glGetProgramInfoLog(program, 512, NULL, info_log);
-		printf("Failed to link program: %s\n", info_log);
-		return 0;
+	// TODO: format should be uvec4: v1, v2, v3, type (water, leaves, grass,
+	// etc.)
+	void serialize_indices(IBuffer &ibuffer) const {
+		for (const auto &triangle : triangles) {
+			ibuffer.push_back(glm::uvec4 {
+				triangle.v1,
+				triangle.v2,
+				triangle.v3,
+				(uint32_t) triangle.shade
+			});
+		}
 	}
 
-	return 1;
-}
+	// Make BVH
+	BVH *make_bvh() {
+		std::vector <BVH *> nodes;
+		nodes.reserve(triangles.size());
 
-inline void set_int(unsigned int program, const char *name, int value)
-{
-	glUseProgram(program);
-	int i = glGetUniformLocation(program, name);
-	glUniform1i(i, value);
-}
+		int id = 0;
+		for (const auto &tri: triangles) {
+			glm::vec3 min = vertices[tri.v1].position;
+			glm::vec3 max = vertices[tri.v1].position;
 
-inline void set_vec3(unsigned int program, const char *name, const glm::vec3 &vec)
-{
-	glUseProgram(program);
-	int i = glGetUniformLocation(program, name);
-	glUniform3fv(i, 1, glm::value_ptr(vec));
-}
+			min = glm::min(min, vertices[tri.v2].position);
+			max = glm::max(max, vertices[tri.v2].position);
+
+			min = glm::min(min, vertices[tri.v3].position);
+			max = glm::max(max, vertices[tri.v3].position);
+
+
+			nodes.push_back(new BVH(BBox {min, max}, id++));
+		}
+
+		return partition(nodes);
+	}
+};
+
+// Generate transform matrix
+struct Transform {
+	glm::vec3 pos;
+	glm::vec3 rot;
+	glm::vec3 scale;
+
+	Transform(const glm::vec3 &pos_ = glm::vec3(0.0f),
+			  const glm::vec3 &rot_ = glm::vec3(0.0f),
+			  const glm::vec3 &scale_ = glm::vec3(1.0f))
+			: pos(pos_), rot(rot_), scale(scale_) {}
+
+	glm::mat4 matrix() {
+		// Convert rot to radians
+		glm::vec3 rad_rot = rot * (float) M_PI / 180.0f;
+
+		glm::mat4 mat {1.0f};
+		mat = glm::translate(mat, pos);
+		mat = glm::rotate(mat, rad_rot.x, glm::vec3(1.0f, 0.0f, 0.0f));
+		mat = glm::rotate(mat, rad_rot.y, glm::vec3(0.0f, 1.0f, 0.0f));
+		mat = glm::rotate(mat, rad_rot.z, glm::vec3(0.0f, 0.0f, 1.0f));
+		mat = glm::scale(mat, scale);
+		return mat;
+	}
+};
 
 #endif
