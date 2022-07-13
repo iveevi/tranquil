@@ -1,6 +1,6 @@
 #version 430
 
-layout (local_size_x = 400, local_size_y = 1) in;
+layout (local_size_x = 1, local_size_y = 1) in;
 
 layout (rgba32f, binding = 0) uniform image2D image;
 
@@ -11,6 +11,10 @@ layout (std430, binding = 1) buffer Vertices {
 layout (std430, binding = 2) buffer Triangles {
 	uint data[];
 } triangles;
+
+layout (std430, binding = 3) buffer BVH {
+	vec4 data[];
+} bvh;
 
 uniform int width;
 uniform int height;
@@ -117,27 +121,157 @@ Intersection _intersect(Ray r, Triangle tri)
 	return Intersection(t, p, normalize(n), 0);
 }
 
-Intersection trace(Ray r)
+Intersection intersect(Ray r, int i)
 {
-	Intersection it = Intersection(1.0/0.0, vec3(0.0), vec3(0.0), -1);
-	for (int i = 0; i < primitives; i++) {
-		// TODO: see if vec3 auto aligns to 4-byte alignment
-		uint a = triangles.data[i * 3];
-		uint b = triangles.data[i * 3 + 1];
-		uint c = triangles.data[i * 3 + 2];
+	uint a = triangles.data[i * 3];
+	uint b = triangles.data[i * 3 + 1];
+	uint c = triangles.data[i * 3 + 2];
 
-		Triangle t = Triangle(
-			vertices.data[a].xyz,
-			vertices.data[b].xyz,
-			vertices.data[c].xyz
-		);
+	Triangle t = Triangle(
+		vertices.data[a].xyz,
+		vertices.data[b].xyz,
+		vertices.data[c].xyz
+	);
 
-		Intersection it2 = _intersect(r, t);
-		if (it2.id != -1 && it2.t < it.t)
-			it = it2;
+	return  _intersect(r, t);
+}
+
+// Get left and right child of the node
+int object(int node)
+{
+	vec4 prop = bvh.data[node];
+	return floatBitsToInt(prop.x);
+}
+
+int hit(int node)
+{
+	vec4 prop = bvh.data[node];
+	return floatBitsToInt(prop.y);
+}
+
+int miss(int node)
+{
+	vec4 prop = bvh.data[node];
+	return floatBitsToInt(prop.z);
+}
+
+// Bounding box
+struct BoundingBox {
+	vec3 pmin;
+	vec3 pmax;
+};
+
+// Intersect bounding box
+// TODO: optimize or shorten this function
+float intersect_box(Ray ray, BoundingBox box)
+{
+	float tmin = (box.pmin.x - ray.p.x) / ray.d.x;
+	float tmax = (box.pmax.x - ray.p.x) / ray.d.x;
+
+	// TODO: swap function?
+	if (tmin > tmax) {
+		float tmp = tmin;
+		tmin = tmax;
+		tmax = tmp;
 	}
 
-	return it;
+	float tymin = (box.pmin.y - ray.p.y) / ray.d.y;
+	float tymax = (box.pmax.y - ray.p.y) / ray.d.y;
+
+	if (tymin > tymax) {
+		float tmp = tymin;
+		tymin = tymax;
+		tymax = tmp;
+	}
+
+	if ((tmin > tymax) || (tymin > tmax))
+		return -1.0;
+
+	if (tymin > tmin)
+		tmin = tymin;
+
+	if (tymax < tmax)
+		tmax = tymax;
+
+	float tzmin = (box.pmin.z - ray.p.z) / ray.d.z;
+	float tzmax = (box.pmax.z - ray.p.z) / ray.d.z;
+
+	if (tzmin > tzmax) {
+		float tmp = tzmin;
+		tzmin = tzmax;
+		tzmax = tmp;
+	}
+
+	if ((tmin > tzmax) || (tzmin > tmax))
+		return -1.0;
+
+	if (tzmin > tmin)
+		tmin = tzmin;
+
+	if (tzmax < tmax)
+		tmax = tzmax;
+
+	return tmin;
+}
+
+// Check if point is in bounding box
+bool in_box(vec3 point, BoundingBox box)
+{
+	bvec3 lt = lessThan(point, box.pmin);
+	bvec3 gt = greaterThan(point, box.pmax);
+
+	return !(any(lt) || any(gt));
+}
+
+BoundingBox bbox(int node)
+{
+	vec3 min = bvh.data[node + 1].xyz;
+	vec3 max = bvh.data[node + 2].xyz;
+	return BoundingBox(min, max);
+}
+
+Intersection trace(Ray ray)
+{
+	// "Min" intersection
+	Intersection mini = Intersection(1.0/0.0, vec3(0.0), vec3(0.0), -1);
+
+	// Traverse BVH as a threaded binary tree
+	int node = 0;
+	while (node != -1) {
+		if (object(node) != -1) {
+			// Get object index
+			int index = object(node);
+
+			// Get object
+			Intersection it = intersect(ray, index);
+
+			// If intersection is valid, update minimum
+			if (it.id != -1 && it.t < mini.t)
+				mini = it;
+
+			// Go to next node (same as miss)
+			node = miss(node);
+		} else {
+			// Get bounding box
+			BoundingBox box = bbox(node);
+
+			// Check if ray intersects (or is inside)
+			// the bounding box
+			float t = intersect_box(ray, box);
+			bool inside = in_box(ray.p, box);
+
+			if ((t > 0.0 && t < mini.t) || inside) {
+				// Traverse left child
+				node = hit(node);
+			} else {
+				// Traverse right child
+				node = miss(node);
+			}
+		}
+	}
+
+	// Return intersection
+	return mini;
 }
 
 void main()
@@ -155,13 +289,20 @@ void main()
 	if (it.id != -1) {
 		color = vec4(0, 0, 1, 1);
 
-		vec3 lpos = vec3(0.0, 5.0, 0.0);
 
-		vec3 ldir = normalize(lpos - it.p);
-		vec3 lcolor = vec3(1.0, 1.0, 1.0);
-		vec3 lintensity = lcolor * max(0.0, dot(it.n, ldir));
+		// Directional light
+		vec3 light = normalize(vec3(1, 1, 1));
+		vec3 normal = normalize(it.n);
+		vec3 view = normalize(camera.origin - it.p);
+		vec3 whalf = normalize(light + view);
 
-		color = vec4(it.n * 0.5 + 0.5, 1.0);
+		float ndotl = max(dot(normal, light), 0.0);
+		float ndoth = max(dot(normal, whalf), 0.0);
+		float pf = pow(ndoth, 32.0);
+
+		vec3 diffuse = vec3(0.5, 1, 0.5) * ndotl;
+		vec3 specular = 0.25 * vec3(1, 1, 1) * pf;
+		color = vec4(diffuse + specular, 1.0);
 	}
 
 	// Set same color to all pixels

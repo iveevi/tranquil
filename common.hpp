@@ -22,7 +22,7 @@
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
-const int PIXEL_SIZE = 8;
+const int PIXEL_SIZE = 4;
 
 inline char *read_file(const char *path)
 {

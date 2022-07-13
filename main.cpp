@@ -9,6 +9,11 @@ struct alignas(16) aligned_vec4 {
 	aligned_vec4(const glm::vec4 &v) : v(v) {}
 };
 
+std::ostream &operator<<(std::ostream &os, const aligned_vec4 &v)
+{
+	return os << glm::to_string(v.v);
+}
+
 // Acceleration structure
 struct BBox {
 	glm::vec3 min;
@@ -20,21 +25,62 @@ struct BBox {
 	}
 };
 
+using BVHBuffer = std::vector <aligned_vec4>;
+
 struct BVH {
 	BBox bbox;
+	int primitive = -1;
 	BVH *left = nullptr;
 	BVH *right = nullptr;
 
-	BVH(const BBox &bbox_) : bbox(bbox_) {}
+	BVH(const BBox &bbox_, int p) : bbox(bbox_), primitive(p) {}
 
 	~BVH() {
 		if (left) delete left;
 		if (right) delete right;
 	}
 
+	int size() const {
+		int size = 1;
+		if (left) size += left->size();
+		if (right) size += right->size();
+		return size;
+	}
+
+	void serialize(BVHBuffer &buffer, int miss = -1) {
+		// Compute indices and hit/miss indices
+		int size = buffer.size();
+		int after = size + 3;
+
+		int left_index = left ? after : -1;
+		int left_size = left ? 3 * left->size() : 0;
+		int right_index = right ? after + left_size : -1;
+
+		int hit = left_index;
+		if (!left && !right) hit = miss;
+
+		int miss_left = right_index;
+		if (!right) miss_left = miss;
+
+		// Serialize
+		aligned_vec4 header = glm::vec3 {
+			*reinterpret_cast <float *> (&primitive),
+			*reinterpret_cast <float *> (&hit),
+			*reinterpret_cast <float *> (&miss)
+		};
+
+		buffer.push_back(header);
+		buffer.push_back(bbox.min);
+		buffer.push_back(bbox.max);
+
+		if (left) left->serialize(buffer, miss_left);
+		if (right) right->serialize(buffer, miss);
+	}
+
 	void print(int indentation = 0) {
-		std::string ident(2 * indentation, ' ');
-		std::cout << ident << "BVH: " << glm::to_string(bbox.min)
+		std::string ident(indentation, '\t');
+		std::cout << ident << "BVH [" << primitive << "]: "
+			<< glm::to_string(bbox.min)
 			<< " -> " << glm::to_string(bbox.max) << std::endl;
 		if (left) left->print(indentation + 1);
 		if (right) right->print(indentation + 1);
@@ -114,7 +160,7 @@ BVH *partition(std::vector <BVH *> &nodes) {
 		return nodes[0];
 
 	if (nodes.size() == 2) {
-		BVH *node = new BVH(union_of(nodes));
+		BVH *node = new BVH(union_of(nodes), -1);
 		node->left = nodes[0];
 		node->right = nodes[1];
 		return node;
@@ -188,7 +234,7 @@ BVH *partition(std::vector <BVH *> &nodes) {
 	BVH *left_node = partition(left);
 	BVH *right_node = partition(right);
 
-	BVH *node = new BVH(bbox);
+	BVH *node = new BVH(bbox, -1);
 	node->left = left_node;
 	node->right = right_node;
 
@@ -215,6 +261,8 @@ struct Mesh {
 			vbuffer.push_back(aligned_vec4(v.position));
 	}
 
+	// TODO: format should be uvec4: v1, v2, v3, type (water, leaves, grass,
+	// etc.)
 	void serialize_indices(IBuffer &ibuffer) const {
 		ibuffer.reserve(indices.size());
 		for (const auto &i : indices)
@@ -226,7 +274,7 @@ struct Mesh {
 		std::vector <BVH *> nodes;
 		nodes.reserve(indices.size());
 
-		for (size_t i = 0; i < indices.size(); i += 3) {
+		for (int i = 0; i < indices.size(); i += 3) {
 			glm::vec3 min = vertices[indices[i]].position;
 			glm::vec3 max = vertices[indices[i]].position;
 
@@ -235,7 +283,7 @@ struct Mesh {
 				max = glm::max(max, vertices[indices[i + j]].position);
 			}
 
-			nodes.push_back(new BVH(BBox {min, max}));
+			nodes.push_back(new BVH(BBox {min, max}, i/3));
 		}
 
 		return partition(nodes);
@@ -257,7 +305,7 @@ Mesh generate_tile()
 	float width = 10.0f;
 	float height = 10.0f;
 
-	size_t resolution = 2;
+	size_t resolution = 10;
 
 	// Height map
 	size_t mapres = resolution + 1;
@@ -305,9 +353,9 @@ Mesh generate_tile()
 		}
 	}
 
-	std::cout << "Vertices: " << tile.vertices.size() << std::endl;
+	/* std::cout << "Vertices: " << tile.vertices.size() << std::endl;
 	for (const auto &v : tile.vertices)
-		std::cout << glm::to_string(v.position) << std::endl;
+		std::cout << glm::to_string(v.position) << std::endl; */
 
 	return tile;
 }
@@ -443,7 +491,20 @@ int main()
 	Mesh tile = generate_tile();
 
 	BVH *bvh = tile.make_bvh();
-	bvh->print();
+
+	// bvh->print();
+
+	BVHBuffer bvh_buffer;
+	bvh->serialize(bvh_buffer);
+
+	/* for (int i = 0; i < bvh_buffer.size(); i += 3) {
+		glm::uvec4 header = *reinterpret_cast <glm::uvec4 *> (&bvh_buffer[i]);
+		std::cout << "Header: " << glm::to_string(header) << std::endl;
+		std::cout << "\t" << bvh_buffer[i + 1] << std::endl;
+		std::cout << "\t" << bvh_buffer[i + 2] << std::endl;
+		std::cout << "\n";
+	} */
+
 	delete bvh;
 
 	VBuffer vertices;
@@ -470,7 +531,19 @@ int main()
 	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(unsigned int) * indices.size(), indices.data(), GL_STATIC_DRAW);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 2);
 
+	// Create storage buffer for BVH
+	unsigned int bsbo;
+
+	// Create storage buffer object
+	glGenBuffers(1, &bsbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, bsbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(aligned_vec4) * bvh_buffer.size(), bvh_buffer.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 3);
+
 	set_int(program, "primitives", tile.triangles());
+
+	std::cout << "Buffer size = " << bvh_buffer.size() << std::endl;
+	std::cout << "Triangles = " << tile.triangles() << std::endl;
 
 	// Loop until the user closes the window
 	float last_time = glfwGetTime();
@@ -498,6 +571,7 @@ int main()
 			glUseProgram(program);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, issbo);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, bsbo);
 			glDispatchCompute(WIDTH/PIXEL_SIZE, HEIGHT/PIXEL_SIZE, 1);
 		}
 
