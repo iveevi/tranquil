@@ -2,7 +2,9 @@
 
 int compile_shader(const char *path, unsigned int type)
 {
-	char *source = read_file(path);
+	std::string glsl_source = read_glsl(path);
+	const char *source = glsl_source.c_str();
+
 	if (!source) {
 		printf("Failed to read shader source\n");
 		return 0;
@@ -21,11 +23,8 @@ int compile_shader(const char *path, unsigned int type)
 	if (!success) {
 		glGetShaderInfoLog(shader, 512, NULL, info_log);
 		printf("Failed to compile shader (%s):\n%s\n", path, info_log);
-		free(source);
 		return 0;
 	}
-
-	free(source);
 
 	printf("Successfully compiled shader %s\n", path);
 	return shader;

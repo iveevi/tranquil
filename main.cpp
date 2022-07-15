@@ -98,7 +98,8 @@ Mesh generate_tile(int resolution)
 {
 	// Generate terrain tile
 	// TODO: pass height map
-	Mesh tile = generate_terrain(resolution);
+	// Mesh tile = generate_terrain(resolution);
+	Mesh tile;
 
 	// Add random columns
 	int nboxes = rand() % 5 + 5;
@@ -182,7 +183,7 @@ int main()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	// Texture data
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, WIDTH, HEIGHT, 0, GL_RGBA, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, WIDTH, HEIGHT, 0, GL_RGBA, GL_FLOAT, nullptr);
 
 	// Bind texture as image
 	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
@@ -196,12 +197,12 @@ int main()
 	srand(clock());
 	uint32_t seed = rand();
 	const siv::PerlinNoise perlin{ seed };
-	float frequency = 2.0f;
+	float frequency = 3.0f;
 	const double f = (frequency / resolution);
 	for (int i = 0; i < resolution * resolution; i++) {
 		int x = i % resolution;
 		int y = i / resolution;
-		height_map_data[i] = 255.0f * perlin.octave2D_01(x * f, y * f, 4);
+		height_map_data[i] = 250.0f * perlin.octave2D_01(x * f, y * f, 4) + 1;
 	}
 
 	// Create and bind texture (binding 1)
@@ -221,7 +222,7 @@ int main()
 	glBindImageTexture(1, heightmap, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
 
 	// Read shader source
-	unsigned int shader = compile_shader("shaders/shader.glsl", GL_COMPUTE_SHADER);
+	unsigned int shader = compile_shader("shaders/pixelizer.glsl", GL_COMPUTE_SHADER);
 
 	// Create program
 	unsigned int program = glCreateProgram();

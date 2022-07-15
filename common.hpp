@@ -6,9 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <fstream>
 #include <iostream>
-#include <vector>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 // GLFW and GLAD
 #include <glad/glad.h>
@@ -27,7 +29,7 @@
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
-const int PIXEL_SIZE = 4;
+const int PIXEL_SIZE = 1;
 
 inline float randf()
 {
@@ -39,31 +41,49 @@ inline float randf(float min, float max)
 	return randf() * (max - min) + min;
 }
 
-inline char *read_file(const char *path)
+inline std::string read_glsl(const std::string &path)
 {
-	char *source;
-	FILE *fp = fopen(path, "r");
-	if (!fp) {
-		printf("Failed to open shader source\n");
-		return NULL;
+	// Open file
+	std::ifstream file(path);
+	if (!file.is_open()) {
+		printf("Failed to open file: %s\n", path.c_str());
+		return "";
 	}
 
-	// Get file size
-	fseek(fp, 0, SEEK_END);
+	// Read lines
+	std::string source;
 
-	// Allocate memory for shader source
-	long size = ftell(fp);
-	source = (char *) malloc(size + 1);
+	std::string line;
+	while (std::getline(file, line)) {
+		// Tokenize line
+		std::stringstream ss(line);
+		std::string token;
 
-	// Rewind file pointer
-	fseek(fp, 0, SEEK_SET);
+		ss >> token;
+		if (token == "#include") {
+			ss >> token;
 
-	// Read shader source
-	fread(source, 1, size, fp);
-	source[size] = '\0';
+			// check that token is of the format "<file>"
+			if (token.size() < 2 || token[0] != '<' || token[token.size() - 1] != '>') {
+				printf("Invalid include directive: %s\n", line.c_str());
+				return "";
+			}
 
-	// Close file
-	fclose(fp);
+			// Get file name
+			std::string file_name = token.substr(1, token.size() - 2);
+
+			// Get file path, which is relative
+			std::string file_path = path.substr(0, path.find_last_of('/') + 1);
+
+			// Read file
+			std::string include_source = read_glsl(file_path + file_name);
+
+			// Append include source
+			source += include_source;
+		} else {
+			source += line + "\n";
+		}
+	}
 
 	return source;
 }
