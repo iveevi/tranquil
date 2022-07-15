@@ -13,19 +13,8 @@ float hmap(Ray r, float t)
 
 vec3 hmap_normal(float x, float z)
 {
-	const float eps = hmap_width/100.0f;
-
-	float y_x1 = hmap(x + eps, z);
-	float y_x2 = hmap(x - eps, z);
-
-	vec3 grad_x = vec3(2 * eps, y_x1 - y_x2, 0);
-
-	float y_z1 = hmap(x, z + eps);
-	float y_z2 = hmap(x, z - eps);
-
-	vec3 grad_z = vec3(0, y_z1 - y_z2, 2 * eps);
-
-	return -normalize(cross(grad_x, grad_z));
+	vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+	return normalize(texture(s_heightmap_normal, uv).xyz * 2.0 - 1.0);
 }
 
 float hmap_derivative(Ray r, float t)

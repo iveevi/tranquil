@@ -6,7 +6,7 @@ uint ePillar = 3;
 
 // Constants
 const float PI = 3.14159265358979323846f;
-const float fov = 45.0f;
+const float fov = 60.0f;
 
 // Intersection between ray and height map
 const float hmap_width = 10.0f;
@@ -22,6 +22,6 @@ const float zmax = hmap_height * 0.5f;
 float scale = 2.0f;
 
 // Shading
-const vec3 light_dir = normalize(vec3(0.5, 0.5, 0.5));
+// const vec3 light_dir = normalize(vec3(0.5, 0.5, 0.5));
 const vec3 light_intensity = vec3(1, 1, 0.8);
 

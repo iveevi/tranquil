@@ -15,12 +15,15 @@ layout (std430, binding = 3) buffer BVH {
 	vec4 data[];
 } bvh;
 
-uniform sampler2D s_heightmap;
+layout (binding = 0) uniform sampler2D s_heightmap;
+layout (binding = 1) uniform sampler2D s_heightmap_normal;
+layout (binding = 2) uniform sampler2D s_clouds;
 
 uniform int width;
 uniform int height;
 uniform int pixel;
 uniform int primitives;
+uniform vec3 light_dir;
 
 struct Camera {
 	vec3 origin;

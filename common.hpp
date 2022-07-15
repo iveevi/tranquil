@@ -29,7 +29,7 @@
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
-const int PIXEL_SIZE = 1;
+const int PIXEL_SIZE = 4;
 
 inline float randf()
 {
@@ -92,6 +92,56 @@ int compile_shader(const char *, unsigned int);
 int link_program(unsigned int);
 void set_int(unsigned int, const char *, int);
 void set_vec3(unsigned int, const char *, const glm::vec3 &);
+
+// Camera stuff
+struct Camera {
+	glm::vec3 front {0.0f, 0.0f, -1.0f};
+	glm::vec3 up {0.0f, 1.0f, 0.0f};
+	glm::vec3 right {1.0f, 0.0f, 0.0f};
+	glm::vec3 eye {0.0f};
+
+	// Default constructor
+	Camera() = default;
+
+	// Initialize camera
+	Camera(const glm::vec3 &eye_, const glm::vec3 &lookat_, const glm::vec3 &up_) {
+		glm::vec3 a = lookat_ - eye_;
+		glm::vec3 b = up_;
+
+		front = glm::normalize(a);
+		right = glm::normalize(glm::cross(b, front));
+		up = glm::cross(front, right);
+
+		eye = eye_;
+	}
+
+	// Send camera info to shader program
+	void send_to_shader(unsigned int program) const {
+		set_vec3(program, "camera.origin", eye);
+		set_vec3(program, "camera.front", front);
+		set_vec3(program, "camera.up", up);
+		set_vec3(program, "camera.right", right);
+	}
+
+	// Move camera
+	void move(float dx, float dy, float dz) {
+		eye += dx * right + dy * up + dz * front;
+	}
+
+	// Set yaw and pitch
+	void set_yaw_pitch(float yaw, float pitch) {
+		front = glm::normalize(glm::vec3(
+			cos(pitch) * cos(yaw),
+			sin(pitch),
+			cos(pitch) * sin(yaw)
+		));
+
+		right = glm::normalize(glm::cross(front, glm::vec3(0.0f, 1.0f, 0.0f)));
+		up = glm::cross(right, front);
+	}
+};
+
+extern Camera camera;
 
 // TODO: add info about normals
 // TODO: use indices and another vertex structure

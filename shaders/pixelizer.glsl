@@ -19,14 +19,35 @@ void main()
 	Ray r = generate_ray(uv);
 
 	// Base color gets brighter as ray and light dir
-	float k = max(dot(r.d, light_dir), 0) * 0.5 + 0.5;
-	vec4 color = vec4(k, k, 0.8, 1.0);
+	float k = pow(max(dot(r.d, light_dir), 0), 8) * 0.5 + 0.5;
+	vec4 color = vec4(k, k, 0.7, 1.0);
 
 	// Intersection it = intersect_heightmap(r);
 	Intersection it = trace(r);
 	if (it.id != -1) {
 		color = shade(it);
 		// color.xyz = it.n * 0.5 + 0.5;
+	} else {
+		// Possibility of clouds (TODO: shade clouds)
+		
+		// Solve for ray pos at 20
+		float h = 7.0f;
+		float t = (h - r.p.y) / r.d.y;
+		vec3 pos = r.p + t * r.d;
+
+		float x = pos.x;
+		float z = pos.z;
+
+		if (t > 0 && x > xmin && x < xmax && z > zmin && z < zmax) {
+			// TODO: function to get terrain uv coordinate
+			vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+			float cloud = texture(s_clouds, uv).x;
+
+			if (cloud > 0.2f) {
+				vec4 c = vec4(0, 0, 0, 1.0);
+				color = mix(color, c, cloud);
+			}
+		}
 	}
 
 	// Set same color to all pixels

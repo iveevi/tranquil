@@ -1,5 +1,9 @@
 #include "common.hpp"
-#include "PerlinNoise.hpp"
+
+#include <PerlinNoise.hpp>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb/stb_image_write.h>
 
 // Generate pillar mesh
 Mesh generate_pillar(const glm::mat4 &transform)
@@ -133,6 +137,48 @@ Mesh generate_tile(int resolution)
 	return tile;
 }
 
+// Camera and mouse handling
+Camera camera;
+
+void mouse_callback(GLFWwindow *window, double xpos, double ypos)
+{
+	static double last_x = WIDTH/2.0;
+	static double last_y = HEIGHT/2.0;
+
+	static float sensitivity = 0.001f;
+
+	static bool first_mouse = true;
+
+	static float yaw = 0.0f;
+	static float pitch = 0.0f;
+	
+	if (first_mouse) {
+		last_x = xpos;
+		last_y = ypos;
+		first_mouse = false;
+	}
+	
+	double xoffset = last_x - xpos;
+	double yoffset = last_y - ypos;
+
+	last_x = xpos;
+	last_y = ypos;
+	
+	xoffset *= sensitivity;
+	yoffset *= sensitivity;
+
+	yaw += xoffset;
+	pitch += yoffset;
+
+	// Clamp pitch
+	if (pitch > 89.0f)
+		pitch = 89.0f;
+	if (pitch < -89.0f)
+		pitch = -89.0f;
+
+	camera.set_yaw_pitch(yaw, pitch);
+}
+
 GLFWwindow *initialize_graphics()
 {
 	// Basic window
@@ -156,6 +202,12 @@ GLFWwindow *initialize_graphics()
 		printf("Failed to initialize OpenGL context\n");
 		return nullptr;
 	}
+
+	// Set up callbacks
+	glfwSetCursorPosCallback(window, mouse_callback);
+
+	// Cursor is disabled by default
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	const GLubyte* renderer = glGetString(GL_RENDERER);
 
@@ -189,21 +241,56 @@ int main()
 	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
 	// Create texture for height map
+	// TODO: struct for height map and resources
 	unsigned int heightmap;
+	unsigned int heightmap_normals;
 
 	int resolution = 512;
-	unsigned char *height_map_data = new unsigned char[resolution * resolution];
+
+	float *heightmap_data = new float[resolution * resolution];
+	glm::vec3 *heightmap_normals_data = new glm::vec3[resolution * resolution];
 
 	srand(clock());
 	uint32_t seed = rand();
-	const siv::PerlinNoise perlin{ seed };
-	float frequency = 3.0f;
+	const siv::PerlinNoise perlin {seed};
+	float frequency = 2.0f;
 	const double f = (frequency / resolution);
+
 	for (int i = 0; i < resolution * resolution; i++) {
 		int x = i % resolution;
 		int y = i / resolution;
-		height_map_data[i] = 250.0f * perlin.octave2D_01(x * f, y * f, 4) + 1;
+		heightmap_data[i] = perlin.octave2D_01(x * f, y * f, 4);
 	}
+
+	// Compute normals
+	for (int x = 0; x < resolution; x++) {
+		for (int y = 0; y < resolution; y++) {
+			float d = 10.0f/resolution;
+
+			glm::vec3 grad_x {2 * d, 0, 0};
+			if (x > 0 && x < resolution - 1) {
+				float y1 = heightmap_data[(x - 1) * resolution + y];
+				float y2 = heightmap_data[(x + 1) * resolution + y];
+
+				grad_x.y = (y2 - y1) / (2 * d);
+			}
+
+			glm::vec3 grad_z {0, 0, 2 * d};
+			if (y > 0 && y < resolution - 1) {
+				float y1 = heightmap_data[x * resolution + y - 1];
+				float y2 = heightmap_data[x * resolution + y + 1];
+
+				grad_z.y = (y2 - y1) / (2 * d);
+			}
+
+			glm::vec3 n = glm::normalize(glm::cross(grad_x, grad_z));
+			heightmap_normals_data[x * resolution + y] = (-n * 0.5f + 0.5f);
+		}
+	}
+
+	unsigned char *heightmap_image = new unsigned char[resolution * resolution];
+	for (int i = 0; i < resolution * resolution; i++)
+		heightmap_image[i] = (unsigned char) (heightmap_data[i] * 255.0f);
 
 	// Create and bind texture (binding 1)
 	glGenTextures(1, &heightmap);
@@ -216,10 +303,62 @@ int main()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	// Texture data
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, height_map_data);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, heightmap_image);
 
 	// Bind texture as sampler
 	glBindImageTexture(1, heightmap, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+
+	// Create and bind texture (binding 2)
+	glGenTextures(1, &heightmap_normals);
+	glBindTexture(GL_TEXTURE_2D, heightmap_normals);
+
+	// Set texture parameters
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// Texture data
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, resolution, resolution, 0, GL_RGB, GL_FLOAT, heightmap_normals_data);
+
+	// Bind texture as sampler
+	glBindImageTexture(2, heightmap_normals, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
+
+	// Cloud density
+	srand(clock());
+
+	seed = rand();
+	const siv::PerlinNoise perlin_cloud {seed};
+
+	int cloud_resolution = 128;
+	unsigned char *cloud_density_image = new unsigned char[cloud_resolution * cloud_resolution];
+
+	glm::vec2 cloud_offset {0.0f, 0.0f};
+	for (int i = 0; i < cloud_resolution * cloud_resolution; i++) {
+		int x = i % cloud_resolution;
+		int y = i / cloud_resolution;
+
+		float density = perlin_cloud.octave2D_01(x * f + cloud_offset.x, y * f + cloud_offset.y, 4);
+		cloud_density_image[i] = (unsigned char) (density * 250.0f + 1);
+	}
+
+	// Create and bind texture (binding 3)
+	unsigned int cloud_density;
+
+	glGenTextures(1, &cloud_density);
+	glBindTexture(GL_TEXTURE_2D, cloud_density);
+
+	// Set texture parameters
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// Texture data
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cloud_resolution, cloud_resolution, 0, GL_RED, GL_UNSIGNED_BYTE, cloud_density_image);
+
+	// Bind texture as sampler
+	glBindImageTexture(3, cloud_density, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
 
 	// Read shader source
 	unsigned int shader = compile_shader("shaders/pixelizer.glsl", GL_COMPUTE_SHADER);
@@ -235,29 +374,16 @@ int main()
 	// Delete shaders
 	glDeleteShader(shader);
 
-	glm::vec3 origin {0, 0, -5};
+	glm::vec3 origin {0, 5, -5};
 	glm::vec3 lookat {0, 2, 0};
 	glm::vec3 up {0, 1, 0};
 
-	auto setup_camera = [program](const glm::vec3 &origin, const glm::vec3 &lookat, const glm::vec3 &up_) {
-		glm::vec3 a = lookat - origin;
-		glm::vec3 b = up_;
+	set_int(program, "width", WIDTH);
+	set_int(program, "height", HEIGHT);
+	set_int(program, "pixel", PIXEL_SIZE);
 
-		glm::vec3 front = glm::normalize(a);
-		glm::vec3 right = glm::normalize(glm::cross(b, front));
-		glm::vec3 up = glm::cross(front, right);
-
-		set_int(program, "width", WIDTH);
-		set_int(program, "height", HEIGHT);
-		set_int(program, "pixel", PIXEL_SIZE);
-
-		set_vec3(program, "camera.origin", origin);
-		set_vec3(program, "camera.front", front);
-		set_vec3(program, "camera.up", up);
-		set_vec3(program, "camera.right", right);
-	};
-
-	setup_camera(origin, lookat, up);
+	camera = Camera {origin, lookat, up};
+	camera.send_to_shader(program);
 
 	// Set up vertex data
 	float vs[] = {
@@ -352,31 +478,88 @@ int main()
 	std::cout << "Buffer size = " << bvh_buffer.size() << std::endl;
 	std::cout << "Triangles = " << tile.triangles.size() << std::endl;
 
+	set_vec3(program, "light_dir", glm::normalize( glm::vec3 {1, 1, 1} ));
+
 	// Loop until the user closes the window
+	float cloud_time = 0;
+	float sun_time = 0;
+
 	while (!glfwWindowShouldClose(window)) {
 		// Close if escape or q
-		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
-				glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
+		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 			glfwSetWindowShouldClose(window, GL_TRUE);
 			continue;
 		}
-
-		// Update
+		
 		float t = glfwGetTime();
-		t /= 2;
 
-		float radius = 5;
-		origin = glm::vec3 {cos(t) * radius, 5, sin(t) * radius};
-		setup_camera(origin, lookat, up);
+		// Move camera
+		float speed = 0.1f;
+
+		float dx = 0, dy = 0, dz = 0;
+		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+			dz += speed;
+		else if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+			dz -= speed;	
+
+		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+			dx += speed;
+		else if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+			dx -= speed;
+
+		if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+			dy -= speed;
+		else if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+			dy += speed;
+
+		camera.move(dx, dy, dz);
+		camera.send_to_shader(program);
+
+		// Update cloud density every so often
+		cloud_time += t;
+
+		if (cloud_time > 0.2f) {
+			cloud_time = 0;
+		
+			cloud_offset += 0.005f;
+
+			for (int i = 0; i < cloud_resolution * cloud_resolution; i++) {
+				int x = i % cloud_resolution;
+				int y = i / cloud_resolution;
+
+				float density = perlin_cloud.octave2D_01(x * f + cloud_offset.x, y * f + cloud_offset.y, 4);
+				cloud_density_image[i] = (unsigned char) (density * 250.0f + 1);
+			}
+
+			// Update texture
+			glBindTexture(GL_TEXTURE_2D, cloud_density);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cloud_resolution, cloud_resolution, 0, GL_RED, GL_UNSIGNED_BYTE, cloud_density_image);
+		}
+
+		// Update sun direction, should lie on the x = z plane
+		float st = sun_time;
+		float y = glm::sin(st);
+		float x = glm::cos(st);
+
+		set_vec3(program, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
+		sun_time = std::fmod(sun_time + t/1000.0f, 2 * glm::pi <float>());
 
 		// Ray tracing
 		{
 			// Bind program and dispatch
 			glUseProgram(program);
+
+			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, heightmap);
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, heightmap_normals);
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_2D, cloud_density);
+
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, issbo);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, bsbo);
+
 			glDispatchCompute(WIDTH/PIXEL_SIZE, HEIGHT/PIXEL_SIZE, 1);
 		}
 
@@ -387,7 +570,10 @@ int main()
 		{
 			// Bind program and draw
 			glUseProgram(program_texture);
+
+			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, texture);
+
 			glBindVertexArray(vao);
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}

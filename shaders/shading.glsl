@@ -58,11 +58,20 @@ vec4 shade(Intersection it)
 
 	Intersection shadow_it = trace(shadow_ray);
 
-	vec3 ds = diffuse + specular;
+	vec3 ds = diffuse;
+
+	float cloud_density = 0.0f;
+	vec3 p = it.p;
+	if (p.x > xmin && p.x < xmax && p.z > zmin && p.z < zmax) {
+		vec2 uv = (vec2(p.x, p.z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+		cloud_density = texture(s_clouds, uv).r;
+	}
+
+	float kcloud = max((1 - cloud_density), 0.1);
 	if (shadow_it.id == -1)
-		color += light_intensity * ds;
+		color += light_intensity * ds * kcloud;
 	else
-		color += 0.25f * ds;
+		color += 0.1f * ds * kcloud;
 
 	return vec4(color, 1);
 }
