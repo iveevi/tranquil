@@ -226,10 +226,126 @@ BoundingBox bbox(int node)
 	return BoundingBox(min, max);
 }
 
+// Intersection between ray and height map
+const float hmap_width = 10.0f;
+const float hmap_height = 10.0f;
+
+// x and z range
+const float xmin = -hmap_width * 0.5f;
+const float xmax = hmap_width * 0.5f;
+
+const float zmin = -hmap_height * 0.5f;
+const float zmax = hmap_height * 0.5f;
+
+float scale = 2.0f;
+
+// Height value at xz
+float hmap(float x, float z)
+{
+	vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+	return scale * texture(s_heightmap, uv).r;
+}
+
+float hmap(Ray r, float t)
+{
+	vec3 p = r.p + r.d * t;
+	return hmap(p.x, p.z);
+}
+
+vec3 hmap_normal(float x, float z)
+{
+	const float eps = hmap_width/100.0f;
+
+	float y_x1 = hmap(x + eps, z);
+	float y_x2 = hmap(x - eps, z);
+
+	vec3 grad_x = vec3(2 * eps, y_x1 - y_x2, 0);
+
+	float y_z1 = hmap(x, z + eps);
+	float y_z2 = hmap(x, z - eps);
+
+	vec3 grad_z = vec3(0, y_z1 - y_z2, 2 * eps);
+
+	return -normalize(cross(grad_x, grad_z));
+}
+
+float hmap_derivative(Ray r, float t)
+{
+	vec3 p0 = r.p + r.d * (t - 0.01);
+	vec3 p1 = r.p + r.d * (t + 0.01);
+
+	float dy_dt = (hmap(p0.x, p0.z) - hmap(p1.x, p1.z))/0.02;
+	return dy_dt;
+}
+
+float _intersect_heightmap(Ray r)
+{
+
+	// Solve for the time when ray intrsects
+	// these planes
+	float t1 = (xmin - r.p.x) / r.d.x;
+	float t2 = (xmax - r.p.x) / r.d.x;
+
+	float t3 = (zmin - r.p.z) / r.d.z;
+	float t4 = (zmax - r.p.z) / r.d.z;
+
+	float tmin = max(min(t1, t2), min(t3, t4));
+	float tmax = min(max(t1, t2), max(t3, t4));
+	tmin = max(tmin, 0.0);
+
+	// Find when y = 0
+	float t5 = (0 - r.p.y) / r.d.y;
+	if (tmax < 0.0f || tmin < 0.0f)
+		return -1.0f;
+
+	// Brute search for the intersection
+	vec3 p = r.p + r.d * tmin;
+	float y = hmap(p.x, p.z);
+
+	if (y < p.y) {
+		float dt = 0.1f;
+
+		float lh = 0.0f;
+		float ly = 0.0f;
+
+		for (float t = tmin; t < tmax; t += dt) {
+			p = r.p + r.d * t;
+			y = hmap(p.x, p.z);
+			if (y >= p.y) {
+				// Interpolate distance
+				return t - dt + dt * (lh - ly)/(p.y - ly - y + lh);
+			}
+
+			ly = p.y;
+			lh = y;
+		}
+	}
+
+	// Everything under is not visible
+	return -1.0f;
+}
+
+Intersection intersect_heightmap(Ray r)
+{
+	float t = _intersect_heightmap(r);
+	if (t < 0.0f)
+		return def_it();
+
+	Intersection it;
+	it.id = 0;
+	it.t = t;
+	it.p = r.p + r.d * t;
+	it.n = hmap_normal(it.p.x, it.p.z);
+	it.shading = eGrass;
+	return it;
+}
+
 Intersection trace(Ray ray)
 {
 	// "Min" intersection
-	Intersection mini = def_it();
+	Intersection mini = intersect_heightmap(ray);
+	if (primitives == 0)
+		return mini;
 
 	// Traverse BVH as a threaded binary tree
 	int node = 0;
@@ -296,6 +412,9 @@ float quantize(float v, float b)
 	return floor(v * b) / b;
 }
 
+const vec3 light_dir = normalize(vec3(0.5, 0.5, 0.5));
+const vec3 light_intensity = vec3(1, 1, 0.8);
+
 vec4 shade(Intersection it)
 {
 	bool valid = true;
@@ -308,7 +427,7 @@ vec4 shade(Intersection it)
 		return vec4(Kd, 1);
 
 	// Directional light
-	vec3 light = normalize(vec3(1, 1, 1));
+	vec3 light = light_dir;
 	vec3 normal = normalize(it.n);
 	vec3 view = normalize(camera.origin - it.p);
 	vec3 whalf = normalize(light + view);
@@ -320,125 +439,16 @@ vec4 shade(Intersection it)
 	vec3 diffuse = Kd * ndotl;
 	vec3 specular = 0.1 * Ks  * pf;
 	vec3 ambient = Kd * 0.25f;
-	vec3 color = diffuse + specular + ambient;
+	vec3 color = ambient;
+
+	// Check if light is visible
+	Ray shadow_ray = Ray(it.p + it.n * 0.1f, light_dir);
+
+	Intersection shadow_it = trace(shadow_ray);
+	if (shadow_it.id == -1)
+		color += light_intensity * (diffuse + specular);
 
 	return vec4(color, 1);
-}
-
-// Intersection between ray and height map
-const float hmap_width = 10.0f;
-const float hmap_height = 10.0f;
-
-// x and z range
-const float xmin = -hmap_width * 0.5f;
-const float xmax = hmap_width * 0.5f;
-
-const float zmin = -hmap_height * 0.5f;
-const float zmax = hmap_height * 0.5f;
-
-float scale = 2.0f;
-
-// Height value at xz
-float hmap(float x, float z)
-{
-	vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
-	return scale * texture(s_heightmap, uv).r;
-}
-
-float hmap(Ray r, float t)
-{
-	vec3 p = r.p + r.d * t;
-	return hmap(p.x, p.z);
-}
-
-vec3 hmap_normal(float x, float z)
-{
-	float y_x1 = hmap(x + 0.001, z);
-	float y_x2 = hmap(x - 0.001, z);
-
-	vec3 grad_x = vec3(0.002, y_x1 - y_x2, 0);
-
-	float y_z1 = hmap(x, z + 0.001);
-	float y_z2 = hmap(x, z - 0.001);
-
-	vec3 grad_z = vec3(0, y_z1 - y_z2, 0.002);
-
-	return -normalize(cross(grad_x, grad_z));
-
-	/* float dy_dx = (hmap(x + 0.01, z) - hmap(x - 0.01, z))/0.02;
-	float dy_dz = (hmap(x, z + 0.01) - hmap(x, z - 0.01))/0.02;
-
-	return normalize(vec3(dy_dx, 1, dy_dz)); */
-}
-
-float hmap_derivative(Ray r, float t)
-{
-	vec3 p0 = r.p + r.d * (t - 0.01);
-	vec3 p1 = r.p + r.d * (t + 0.01);
-
-	float dy_dt = (hmap(p0.x, p0.z) - hmap(p1.x, p1.z))/0.02;
-	return dy_dt;
-}
-
-float _intersect_heightmap(Ray r)
-{
-
-	// Solve for the time when ray intrsects
-	// these planes
-	float t1 = (xmin - r.p.x) / r.d.x;
-	float t2 = (xmax - r.p.x) / r.d.x;
-
-	float t3 = (zmin - r.p.z) / r.d.z;
-	float t4 = (zmax - r.p.z) / r.d.z;
-
-	float tmin = max(min(t1, t2), min(t3, t4));
-	float tmax = min(max(t1, t2), max(t3, t4));
-
-	// Find when y = 0
-	float t5 = (0.0f - r.p.y) / r.d.y;
-	if (tmax < 0.0f)
-		return -1.0f;
-
-	// Brute search for the intersection
-	vec3 p = r.p + r.d * tmin;
-	float y = hmap(p.x, p.z);
-
-	if (y < p.y) {
-		float dt = 0.01f;
-
-		float lh = 0.0f;
-		float ly = 0.0f;
-
-		for (float t = tmin; t < tmax; t += dt) {
-			p = r.p + r.d * t;
-			y = hmap(p.x, p.z);
-			if (y >= p.y) {
-				// Interpolate distance
-				return t - dt + dt * (lh - ly)/(p.y - ly - y + lh);
-			}
-
-			ly = p.y;
-			lh = y;
-		}
-	}
-
-	// Everything under is not visible
-	return -1.0f;
-}
-
-Intersection intersect_heightmap(Ray r)
-{
-	float t = _intersect_heightmap(r);
-	if (t < 0.0f)
-		return def_it();
-
-	Intersection it;
-	it.id = 0;
-	it.t = t;
-	it.p = r.p + r.d * t;
-	it.n = hmap_normal(it.p.x, it.p.z);
-	it.shading = eGrass;
-	return it;
 }
 
 void main()
@@ -449,14 +459,17 @@ void main()
 	uv /= vec2(width, height);
 
 	Ray r = generate_ray(uv);
-	// Intersection it = trace(r);
 
-	// If no hit, then some blue gradient
-	vec4 color = vec4(0.1, 0.1, 1 - dot(r.d, camera.front), 1.0);
+	// Base color gets brighter as ray and light dir
+	float k = max(dot(r.d, light_dir), 0) * 0.5 + 0.5;
+	vec4 color = vec4(k, k, 0.8, 1.0);
 
-	Intersection it = intersect_heightmap(r);
-	if (it.id != -1)
+	// Intersection it = intersect_heightmap(r);
+	Intersection it = trace(r);
+	if (it.id != -1) {
 		color = shade(it);
+		// color.xyz = it.n * 0.5 + 0.5;
+	}
 
 	// Set same color to all pixels
 	for (int i = 0; i < pixel; i++) {
