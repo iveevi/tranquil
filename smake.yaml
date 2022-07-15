@@ -1,13 +1,16 @@
+default_compiler: clang++
+default_standard: c++17
+
 builds:
   - main:
     - sources: 'main.cpp, glad/src/glad.c, opengl.cpp'
     - idirs: '., glad/include, thirdparty, thirdparty/glm'
     - libraries: 'glfw'
   - main_gdb:
-    - sources: 'main.cpp, glad/src/glad.c'
+    - sources: 'main.cpp, glad/src/glad.c, opengl.cpp'
     - idirs: '., glad/include, thirdparty, thirdparty/glm'
     - libraries: 'glfw'
-    - flags: '-g'
+    - flags: '-std=c++17 -g'
 
 targets:
   - main:

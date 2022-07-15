@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "PerlinNoise.hpp"
 
 // Generate pillar mesh
 Mesh generate_pillar(const glm::mat4 &transform)
@@ -186,6 +187,39 @@ int main()
 	// Bind texture as image
 	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
+	// Create texture for height map
+	unsigned int heightmap;
+
+	int resolution = 512;
+	unsigned char *height_map_data = new unsigned char[resolution * resolution];
+
+	srand(clock());
+	uint32_t seed = rand();
+	const siv::PerlinNoise perlin{ seed };
+	float frequency = 2.0f;
+	const double f = (frequency / resolution);
+	for (int i = 0; i < resolution * resolution; i++) {
+		int x = i % resolution;
+		int y = i / resolution;
+		height_map_data[i] = 255.0f * perlin.octave2D_01(x * f, y * f, 4);
+	}
+
+	// Create and bind texture (binding 1)
+	glGenTextures(1, &heightmap);
+	glBindTexture(GL_TEXTURE_2D, heightmap);
+
+	// Set texture parameters
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// Texture data
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, height_map_data);
+
+	// Bind texture as sampler
+	glBindImageTexture(1, heightmap, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+
 	// Read shader source
 	unsigned int shader = compile_shader("shaders/shader.glsl", GL_COMPUTE_SHADER);
 
@@ -201,7 +235,7 @@ int main()
 	glDeleteShader(shader);
 
 	glm::vec3 origin {0, 0, -5};
-	glm::vec3 lookat {0, 0, 0};
+	glm::vec3 lookat {0, 2, 0};
 	glm::vec3 up {0, 1, 0};
 
 	auto setup_camera = [program](const glm::vec3 &origin, const glm::vec3 &lookat, const glm::vec3 &up_) {
@@ -330,7 +364,7 @@ int main()
 		float t = glfwGetTime();
 		t /= 2;
 
-		float radius = 10;
+		float radius = 5;
 		origin = glm::vec3 {cos(t) * radius, 5, sin(t) * radius};
 		setup_camera(origin, lookat, up);
 
@@ -338,6 +372,7 @@ int main()
 		{
 			// Bind program and dispatch
 			glUseProgram(program);
+			glBindTexture(GL_TEXTURE_2D, heightmap);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, issbo);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, bsbo);
