@@ -18,6 +18,8 @@ float quantize(float v, float b)
 vec4 shade(Intersection it)
 {
 	vec3 Kd = it.Kd;
+	if (grass_length == 1 || grass_power == 1)
+		return vec4(Kd, 1.0);
 
 	// Directional light
 	vec3 light = light_dir;

@@ -1,7 +1,5 @@
 #include "common.hpp"
 
-#include <PerlinNoise.hpp>
-
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -44,14 +42,11 @@ void initialize_imgui(GLFWwindow *window)
 	ImGui_ImplOpenGL3_Init("#version 430");
 }
 
-inline float lerp(float a, float b, float t)
-{
-	return a + (b - a) * t;
-}
-
 // Struct for managing data for the heightmap
-class HeightMap {
-	float		*data;
+class GrassMap {
+	float		*grass;
+	float		*grass_length;
+	float		*grass_power;
 	int		data_res;
 
 	// Generate heightmap
@@ -59,14 +54,25 @@ class HeightMap {
 		srand(clock());
 
 		// Perlin noise generator
-		uint32_t seed = rand();
-		const siv::PerlinNoise perlin {seed};
+		uint32_t seed1 = rand();
+		uint32_t seed2 = rand();
+		uint32_t seed3 = rand();
 
-		const double f = (frequency/data_res);
+		const siv::PerlinNoise perlin1 {seed1};
+		const siv::PerlinNoise perlin2 {seed2};
+		const siv::PerlinNoise perlin3 {seed3};
+
+		const double f1 = (frequency/data_res);
+		const double f2 = f1/10.0f;
+		const double f3 = f1/100.0f;
+
 		for (int i = 0; i < data_res * data_res; i++) {
 			int x = i % data_res;
 			int y = i / data_res;
-			data[i] = perlin.octave2D_01(x * f, y * f, octaves);
+
+			grass[i] = perlin1.octave2D_01(x * f1, y * f1, octaves);
+			grass_length[i] = perlin2.octave2D_01(x * f2, y * f2, 16);
+			grass_power[i] = perlin3.octave2D_01(x * f3, y * f3, 4);
 		}
 	}
 
@@ -75,22 +81,25 @@ class HeightMap {
 		// x and z are in the range +/- terrain_size
 
 		// Scale to [0, resolution]
-		x = 0.5f + x * data_res/state.terrain_size;
-		z = 0.5f + z * data_res/state.terrain_size;
+		x = data_res/2.0f + x * data_res/state.terrain_size;
+		z = data_res/2.0f + z * data_res/state.terrain_size;
 
 		// Floor to nearest int
 		int x0 = glm::clamp(floor(x), 0.0f, data_res - 1.0f);
 		int z0 = glm::clamp(floor(z), 0.0f, data_res - 1.0f);
+
+		int z1 = glm::clamp((float) ceil(z), 0.0f, data_res - 1.0f);
+		int x1 = glm::clamp((float) ceil(x), 0.0f, data_res - 1.0f);
 
 		// Get fractional parts
 		float xf = x - x0;
 		float zf = z - z0;
 
 		// Get heights
-		float h00 = data[z0 * data_res + x0];
-		float h01 = data[z0 * data_res + x0 + 1];
-		float h10 = data[(z0 + 1) * data_res + x0];
-		float h11 = data[(z0 + 1) * data_res + x0 + 1];
+		float h00 = grass[z0 * data_res + x0];
+		float h01 = grass[z0 * data_res + x1];
+		float h10 = grass[z1 * data_res + x0];
+		float h11 = grass[z1 * data_res + x1];
 
 		// Interpolate
 		float h0 = lerp(h00, h01, xf);
@@ -110,8 +119,8 @@ class HeightMap {
 
 		for (int x = 0; x < normals_res; x++) {
 			for (int y = 0; y < normals_res; y++) {
-				float x_ = x * d - 5.0f;
-				float z_ = y * d - 5.0f;
+				float x_ = x * d - state.terrain_size/2.0f;
+				float z_ = y * d - state.terrain_size/2.0f;
 
 				glm::vec3 grad_x {2 * d, 0, 0};
 				if (x > 0 && x < normals_res - 1) {
@@ -134,15 +143,33 @@ class HeightMap {
 			}
 		}
 	}
+
+	// Creating texture
+	static unsigned int make_texture(uint8_t *data, int res) {
+		unsigned int tex;
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, res, res, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+		glBindImageTexture(1, tex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+		return tex;
+	}
 public:
-	unsigned int	t_height;
+	unsigned int	t_grass;
+	unsigned int	t_length;
+	unsigned int	t_power;
 	unsigned int	t_normal;
 
 	// Constructor
-	HeightMap(int resolution, float frequency, int octaves)
+	GrassMap(int resolution, float frequency, int octaves)
 			: data_res(resolution), normals_res(2 * resolution) {
 		// Allocate memory for heightmap
-		data = new float[data_res * data_res];
+		grass = new float[data_res * data_res];
+		grass_length = new float[data_res * data_res];
+		grass_power = new float[data_res * data_res];
 		normals = new glm::vec3[normals_res * normals_res];
 
 		// Generate heightmap and normals
@@ -150,21 +177,21 @@ public:
 		generate_normals();
 
 		// Convert to byte array
-		uint8_t *image = new uint8_t[resolution * resolution];
-		for (int i = 0; i < resolution * resolution; i++)
-			image[i] = (uint8_t) (data[i] * std::numeric_limits <uint8_t> ::max());
+		uint8_t *image_grass = new uint8_t[resolution * resolution];
+		uint8_t *image_grass_length = new uint8_t[resolution * resolution];
+		uint8_t *image_grass_power = new uint8_t[resolution * resolution];
 
+		constexpr uint8_t max = 255;
+		for (int i = 0; i < resolution * resolution; i++) {
+			image_grass[i] = (uint8_t) (grass[i] * max);
+			image_grass_length[i] = (uint8_t) (grass_length[i] * max);
+			image_grass_power[i] = (uint8_t) (grass_power[i] * max);
+		}
 
 		// Create heightmap texture
-		// TODO: using data instead of image produces grass-like terrain
-		glGenTextures(1, &t_height);
-		glBindTexture(GL_TEXTURE_2D, t_height);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, image);
-		glBindImageTexture(1, t_height, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+		t_grass = make_texture(image_grass, resolution);
+		t_length = make_texture(image_grass_length, resolution);
+		t_power = make_texture(image_grass_power, resolution);
 
 		// Create normal texture
 		glGenTextures(1, &t_normal);
@@ -180,8 +207,13 @@ public:
 		glBindTexture(GL_TEXTURE_2D, 0);
 
 		// Free memory
-		delete[] data;
+		delete[] grass;
+		delete[] grass_length;
+		delete[] grass_power;
 		delete[] normals;
+		delete[] image_grass;
+		delete[] image_grass_length;
+		delete[] image_grass_power;
 	}
 };
 
@@ -263,6 +295,9 @@ int main()
 	// Create heightmap
 	size_t seed;
 	HeightMap heightmap(128, 1.0f, 4);
+
+	// Create grass map
+	GrassMap grassmap(1024, 256.0f, 8);
 
 	// Cloud density
 	srand(clock());
@@ -352,6 +387,9 @@ int main()
 	set_int(shaders.pixelizer, "pixel", PIXEL_SIZE);
 	set_int(shaders.pixelizer, "clouds", state.show_clouds);
 	set_int(shaders.pixelizer, "normals", state.show_normals);
+	set_int(shaders.pixelizer, "grass", state.show_grass);
+	set_int(shaders.pixelizer, "grass_lenght", state.show_grass_length);
+	set_int(shaders.pixelizer, "grass_power", state.show_grass_power);
 	set_float(shaders.pixelizer, "ray_marching_step", state.ray_marching_step);
 	set_float(shaders.pixelizer, "ray_shadow_step", state.ray_shadow_step);
 	set_float(shaders.pixelizer, "terrain_size", state.terrain_size);
@@ -509,6 +547,14 @@ int main()
 			glBindTexture(GL_TEXTURE_2D, cloud_density);
 			glActiveTexture(GL_TEXTURE3);
 			glBindTexture(GL_TEXTURE_2D, grass_texture);
+			glActiveTexture(GL_TEXTURE4);
+			glBindTexture(GL_TEXTURE_2D, grassmap.t_grass);
+			glActiveTexture(GL_TEXTURE5);
+			glBindTexture(GL_TEXTURE_2D, grassmap.t_normal);
+			glActiveTexture(GL_TEXTURE6);
+			glBindTexture(GL_TEXTURE_2D, grassmap.t_length);
+			glActiveTexture(GL_TEXTURE7);
+			glBindTexture(GL_TEXTURE_2D, grassmap.t_power);
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vertices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
@@ -518,7 +564,7 @@ int main()
 		}
 
 		// Wait
-		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+		// glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 		// Render texture
 		{
@@ -543,6 +589,14 @@ int main()
 				ImGui::Begin("Settings");
 				ImGui::Checkbox("Show triangles", &state.show_triangles);
 				ImGui::Checkbox("Show clouds", &state.show_clouds);
+				ImGui::Checkbox("Show grass", &state.show_grass);
+
+				if (ImGui::Checkbox("Show grass length", &state.show_grass_length))
+					state.show_grass_power = false;
+
+				if (ImGui::Checkbox("Show grass power", &state.show_grass_power))
+					state.show_grass_length = false;
+
 				ImGui::Checkbox("Show normals", &state.show_normals);
 				ImGui::SliderFloat("Ray marching step", &state.ray_marching_step, 1e-3f, 1.0f, "%.3g", 1 << 5);
 				ImGui::SliderFloat("Ray shadow step", &state.ray_shadow_step, 1e-3f, 1.0f, "%.3g", 1 << 5);
@@ -567,6 +621,9 @@ int main()
 
 		set_int(shaders.pixelizer, "clouds", state.show_clouds);
 		set_int(shaders.pixelizer, "normals", state.show_normals);
+		set_int(shaders.pixelizer, "grass", state.show_grass);
+		set_int(shaders.pixelizer, "grass_length", state.show_grass_length);
+		set_int(shaders.pixelizer, "grass_power", state.show_grass_power);
 		set_float(shaders.pixelizer, "ray_marching_step", state.ray_marching_step);
 		set_float(shaders.pixelizer, "ray_shadow_step", state.ray_shadow_step);
 

@@ -2,7 +2,19 @@
 float hmap(float x, float z)
 {
 	vec2 uv = terrain_uv(vec2(x, z));
-	return scale * texture(s_heightmap, uv).r;
+	float h = scale * texture(s_heightmap, uv).r;
+	float g = texture(s_grassmap, uv).r;
+	float l = texture(s_grass_length, uv).r;
+	float p = texture(s_grass_power, uv).r;
+	if (grass == 1)
+		h += l * pow(g, 4 * p);
+	return h;
+}
+
+float gmap(float x, float z)
+{
+	vec2 uv = terrain_uv(vec2(x, z));
+	return scale * texture(s_grassmap, uv).r;
 }
 
 float hmap(Ray r, float t)
@@ -14,12 +26,19 @@ float hmap(Ray r, float t)
 vec3 hmap_normal(float x, float z)
 {
 	vec2 uv = terrain_uv(vec2(x, z));
-	return normalize(texture(s_heightmap_normal, uv).xyz * 2.0 - 1.0);
+	vec3 nh = normalize(texture(s_heightmap_normal, uv).xyz * 2.0 - 1.0);
+	vec3 ng = normalize(texture(s_grassmap_normal, uv).xyz * 2.0 - 1.0);
+
+	if (grass == 1) {
+		float k = 0.1;
+		return normalize((1 - k) * nh + k * ng);
+	}
+
+	return nh;
 }
 
 Intersection intersect_heightmap(Ray r)
 {
-
 	// Solve for the time when ray intrsects
 	// these planes
 	float t1 = (xmin - r.p.x) / r.d.x;
@@ -60,7 +79,16 @@ Intersection intersect_heightmap(Ray r)
 				it.p = r.p + r.d * t;
 				it.n = hmap_normal(p.x, p.z);
 				it.shading = eGrass;
+
 				it.Kd = vec3(0.5, 1, 0.5);
+				if (grass_length == 1) {
+					vec2 uv = terrain_uv(vec2(p.x, p.z));
+					it.Kd.rgb = vec3(texture(s_grass_length, uv).r);
+				} else if (grass_power == 1) {
+					vec2 uv = terrain_uv(vec2(p.x, p.z));
+					it.Kd.rgb = vec3(texture(s_grass_power, uv).r);
+				}
+
 				return it;
 			}
 
@@ -86,7 +114,16 @@ Intersection intersect_heightmap(Ray r)
 				it.p = r.p + r.d * t;
 				it.n = -hmap_normal(p.x, p.z);
 				it.shading = eGrass;
+				
 				it.Kd = vec3(0.5, 1, 0.5);
+				if (grass_length == 1) {
+					vec2 uv = terrain_uv(vec2(p.x, p.z));
+					it.Kd.rgb = vec3(texture(s_grass_length, uv).r);
+				} else if (grass_power == 1) {
+					vec2 uv = terrain_uv(vec2(p.x, p.z));
+					it.Kd.rgb = vec3(texture(s_grass_power, uv).r);
+				}
+
 				return it;
 			}
 

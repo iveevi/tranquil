@@ -22,6 +22,9 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
+// Perlin noise
+#include <PerlinNoise.hpp>
+
 // App headers
 #include "bvh.hpp"
 #include "core.hpp"
@@ -395,18 +398,164 @@ inline Mesh generate_tile(int resolution)
 
 // State for the application
 struct State {
-	bool show_clouds = false;
+	bool show_clouds = true;
 	bool show_normals = false;
 	bool show_triangles = false;
 	bool tab = false;
-	bool viewing_mode = false;
+	bool viewing_mode = true;
 	float ray_marching_step = 0.01f;
 	float ray_shadow_step = 0.001f;
+	bool show_grass = true;
+	bool show_grass_length = false;
+	bool show_grass_power = false;
 	const float terrain_size = 20.0f;
 
 	// TODO: method to apply settings if changed
 };
 
 extern State state;
+
+inline float lerp(float a, float b, float t)
+{
+	return a + (b - a) * t;
+}
+
+class HeightMap {
+	float		*data;
+	int		data_res;
+
+	// Generate heightmap
+	void generate_grassmap(float frequency, int octaves) {
+		srand(clock());
+
+		// Perlin noise generator
+		uint32_t seed = rand();
+		const siv::PerlinNoise perlin_grass {seed};
+
+		const double f = (frequency/data_res);
+		for (int i = 0; i < data_res * data_res; i++) {
+			int x = i % data_res;
+			int y = i / data_res;
+			data[i] = perlin_grass.octave2D_01(x * f, y * f, octaves);
+		}
+	}
+
+	// Evaluate the heightmap at a given point
+	float eval(float x, float z) {
+		// x and z are in the range +/- terrain_size
+
+		// Scale to [0, resolution]
+		x = data_res/2.0f + x * data_res/state.terrain_size;
+		z = data_res/2.0f + z * data_res/state.terrain_size;
+
+		// Floor to nearest int
+		int x0 = glm::clamp((float) floor(x), 0.0f, data_res - 1.0f);
+		int z0 = glm::clamp((float) floor(z), 0.0f, data_res - 1.0f);
+
+		int z1 = glm::clamp((float) ceil(z), 0.0f, data_res - 1.0f);
+		int x1 = glm::clamp((float) ceil(x), 0.0f, data_res - 1.0f);
+
+		// Get fractional parts
+		float xf = x - x0;
+		float zf = z - z0;
+
+		// Get heights
+		float h00 = data[z0 * data_res + x0];
+		float h01 = data[z0 * data_res + x1];
+		float h10 = data[z1 * data_res + x0];
+		float h11 = data[z1 * data_res + x1];
+
+		// Interpolate
+		float h0 = lerp(h00, h01, xf);
+		float h1 = lerp(h10, h11, xf);
+		float h = lerp(h0, h1, zf);
+
+		return h;
+	}
+
+	glm::vec3	*normals;
+	int		normals_res;
+
+	// Generate normals
+	void generate_normals() {
+		float d = state.terrain_size/normals_res;
+		float eps = 0.01f;
+
+		for (int x = 0; x < normals_res; x++) {
+			for (int y = 0; y < normals_res; y++) {
+				float x_ = x * d - state.terrain_size/2.0f;
+				float z_ = y * d - state.terrain_size/2.0f;
+
+				glm::vec3 grad_x {2 * d, 0, 0};
+				if (x > 0 && x < normals_res - 1) {
+					float y1 = eval(x_ + eps, z_);
+					float y2 = eval(x_ - eps, z_);
+
+					grad_x.y = (y1 - y2) / (2 * eps);
+				}
+
+				glm::vec3 grad_z {0, 0, 2 * d};
+				if (y > 0 && y < normals_res - 1) {
+					float y1 = eval(x_, z_ + eps);
+					float y2 = eval(x_, z_ - eps);
+
+					grad_z.y = (y1 - y2) / (2 * eps);
+				}
+
+				glm::vec3 n = -glm::normalize(glm::cross(grad_x, grad_z));
+				normals[x * normals_res + y] = (n * 0.5f + 0.5f);
+			}
+		}
+	}
+public:
+	unsigned int	t_height;
+	unsigned int	t_normal;
+
+	// Constructor
+	HeightMap(int resolution, float frequency, int octaves)
+			: data_res(resolution), normals_res(2 * resolution) {
+		// Allocate memory for heightmap
+		data = new float[data_res * data_res];
+		normals = new glm::vec3[normals_res * normals_res];
+
+		// Generate heightmap and normals
+		generate_grassmap(frequency, octaves);
+		generate_normals();
+
+		// Convert to byte array
+		uint8_t *image = new uint8_t[resolution * resolution];
+		for (int i = 0; i < resolution * resolution; i++)
+			image[i] = (uint8_t) (data[i] * std::numeric_limits <uint8_t> ::max());
+
+		// Create texture
+		glGenTextures(1, &t_height);
+		glBindTexture(GL_TEXTURE_2D, t_height);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, image);
+		glBindImageTexture(5, t_height, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+
+		// Create normal texture
+		glGenTextures(1, &t_normal);
+		glBindTexture(GL_TEXTURE_2D, t_normal);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, normals_res, normals_res, 0, GL_RGB, GL_FLOAT, normals);
+		glBindImageTexture(6, t_normal, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
+
+		// TODO: constexpr binding points
+
+		// Unbind textures
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		// Free memory
+		delete[] data;
+		delete[] normals;
+	}
+};
 
 #endif

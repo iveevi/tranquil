@@ -67,7 +67,7 @@ Intersection trace(Ray ray)
 	// "Min" intersection
 	Intersection mini = intersect_heightmap(ray);
 
-	// Quads
+	/* Quads
 	Quad q = Quad(
 		vec3(0, 0, 0),
 		vec3(5, 0, 0),
@@ -79,7 +79,7 @@ Intersection trace(Ray ray)
 
 	// TODO: min function
 	if (qi.id != -1 && qi.t < mini.t)
-		mini = qi;
+		mini = qi; */
 
 	if (primitives == 0)
 		return mini;
@@ -129,7 +129,7 @@ Intersection shadow_trace(Ray ray)
 	// "Min" intersection
 	Intersection mini = def_it();
 
-	// Quads
+	/* Quads
 	Quad q = Quad(
 		vec3(0, 0, 0),
 		vec3(5, 0, 0),
@@ -141,7 +141,7 @@ Intersection shadow_trace(Ray ray)
 
 	// TODO: min function
 	if (qi.id != -1 && qi.t < mini.t)
-		mini = qi;
+		mini = qi; */
 
 	if (primitives == 0)
 		return mini;

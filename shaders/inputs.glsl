@@ -19,6 +19,10 @@ layout (binding = 0) uniform sampler2D s_heightmap;
 layout (binding = 1) uniform sampler2D s_heightmap_normal;
 layout (binding = 2) uniform sampler2D s_clouds;
 layout (binding = 3) uniform sampler2D s_grass;
+layout (binding = 4) uniform sampler2D s_grassmap;
+layout (binding = 5) uniform sampler2D s_grassmap_normal;
+layout (binding = 6) uniform sampler2D s_grass_length;
+layout (binding = 7) uniform sampler2D s_grass_power;
 
 uniform float ray_marching_step;
 uniform float ray_shadow_step;
@@ -26,6 +30,9 @@ uniform float terrain_size;
 
 uniform int clouds;
 uniform int height;
+uniform int grass;
+uniform int grass_length;
+uniform int grass_power;
 uniform int normals;
 uniform int pixel;
 uniform int primitives;
