@@ -1,3 +1,4 @@
 .cache
 .smake
 compile_commands.json
+tmp

@@ -5,6 +5,17 @@ int compile_shader(const char *path, unsigned int type)
 	std::string glsl_source = read_glsl(path);
 	const char *source = glsl_source.c_str();
 
+	// Write the source to a temporary file
+	system("mkdir -p tmp");
+
+	// Extract the filename from the path
+	std::string filename = path;
+	filename = filename.substr(filename.find_last_of("/") + 1);
+
+	std::ofstream tmp("tmp/out_" + filename);
+	tmp << source;
+	tmp.close();
+
 	if (!source) {
 		printf("Failed to read shader source\n");
 		return 0;
@@ -54,6 +65,13 @@ void set_int(unsigned int program, const char *name, int value)
 	glUseProgram(program);
 	int i = glGetUniformLocation(program, name);
 	glUniform1i(i, value);
+}
+
+void set_float(unsigned int program, const char *name, float value)
+{
+	glUseProgram(program);
+	int i = glGetUniformLocation(program, name);
+	glUniform1f(i, value);
 }
 
 void set_vec3(unsigned int program, const char *name, const glm::vec3 &vec)

@@ -1,7 +1,7 @@
 // Height value at xz
 float hmap(float x, float z)
 {
-	vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+	vec2 uv = terrain_uv(vec2(x, z));
 	return scale * texture(s_heightmap, uv).r;
 }
 
@@ -13,17 +13,8 @@ float hmap(Ray r, float t)
 
 vec3 hmap_normal(float x, float z)
 {
-	vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+	vec2 uv = terrain_uv(vec2(x, z));
 	return normalize(texture(s_heightmap_normal, uv).xyz * 2.0 - 1.0);
-}
-
-float hmap_derivative(Ray r, float t)
-{
-	vec3 p0 = r.p + r.d * (t - 0.01);
-	vec3 p1 = r.p + r.d * (t + 0.01);
-
-	float dy_dt = (hmap(p0.x, p0.z) - hmap(p1.x, p1.z))/0.02;
-	return dy_dt;
 }
 
 Intersection intersect_heightmap(Ray r)
@@ -51,7 +42,7 @@ Intersection intersect_heightmap(Ray r)
 	float y = hmap(p.x, p.z);
 
 	if (y < p.y) {
-		float dt = 0.1f;
+		float dt = ray_marching_step;
 
 		float lh = 0.0f;
 		float ly = 0.0f;
@@ -69,6 +60,7 @@ Intersection intersect_heightmap(Ray r)
 				it.p = r.p + r.d * t;
 				it.n = hmap_normal(p.x, p.z);
 				it.shading = eGrass;
+				it.Kd = vec3(0.5, 1, 0.5);
 				return it;
 			}
 
@@ -76,7 +68,7 @@ Intersection intersect_heightmap(Ray r)
 			lh = y;
 		}
 	} else {
-		float dt = 0.1f;
+		float dt = ray_marching_step;
 
 		float lh = 0.0f;
 		float ly = 0.0f;
@@ -94,6 +86,7 @@ Intersection intersect_heightmap(Ray r)
 				it.p = r.p + r.d * t;
 				it.n = -hmap_normal(p.x, p.z);
 				it.shading = eGrass;
+				it.Kd = vec3(0.5, 1, 0.5);
 				return it;
 			}
 

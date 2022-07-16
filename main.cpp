@@ -2,6 +2,7 @@
 
 #include <PerlinNoise.hpp>
 
+#define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb/stb_image.h>
 #include <stb/stb_image_write.h>
@@ -33,25 +34,204 @@ void initialize_imgui(GLFWwindow *window)
 	// Setup Dear ImGui context
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO(); (void) io;
-	//io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-	//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+	ImGuiIO &io = ImGui::GetIO(); (void) io;
 
 	// Setup Dear ImGui style
 	ImGui::StyleColorsDark();
-	//ImGui::StyleColorsLight();
 
 	// Setup Platform/Renderer backends
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplOpenGL3_Init("#version 430");
 }
 
+inline float lerp(float a, float b, float t)
+{
+	return a + (b - a) * t;
+}
+
 // Struct for managing data for the heightmap
-struct HeightMap {
+class HeightMap {
+	float		*data;
+	int		data_res;
+
+	// Generate heightmap
+	void generate_heightmap(float frequency, int octaves) {
+		srand(clock());
+
+		// Perlin noise generator
+		uint32_t seed = rand();
+		const siv::PerlinNoise perlin {seed};
+
+		const double f = (frequency/data_res);
+		for (int i = 0; i < data_res * data_res; i++) {
+			int x = i % data_res;
+			int y = i / data_res;
+			data[i] = perlin.octave2D_01(x * f, y * f, octaves);
+		}
+	}
+
+	// Evaluate the heightmap at a given point
+	float eval(float x, float z) {
+		// x and z are in the range +/- terrain_size
+
+		// Scale to [0, resolution]
+		x = 0.5f + x * data_res/state.terrain_size;
+		z = 0.5f + z * data_res/state.terrain_size;
+
+		// Floor to nearest int
+		int x0 = glm::clamp(floor(x), 0.0f, data_res - 1.0f);
+		int z0 = glm::clamp(floor(z), 0.0f, data_res - 1.0f);
+
+		// Get fractional parts
+		float xf = x - x0;
+		float zf = z - z0;
+
+		// Get heights
+		float h00 = data[z0 * data_res + x0];
+		float h01 = data[z0 * data_res + x0 + 1];
+		float h10 = data[(z0 + 1) * data_res + x0];
+		float h11 = data[(z0 + 1) * data_res + x0 + 1];
+
+		// Interpolate
+		float h0 = lerp(h00, h01, xf);
+		float h1 = lerp(h10, h11, xf);
+		float h = lerp(h0, h1, zf);
+
+		return h;
+	}
+
+	glm::vec3	*normals;
+	int		normals_res;
+
+	// Generate normals
+	void generate_normals() {
+		float d = state.terrain_size/normals_res;
+		float eps = 0.01f;
+
+		for (int x = 0; x < normals_res; x++) {
+			for (int y = 0; y < normals_res; y++) {
+				float x_ = x * d - 5.0f;
+				float z_ = y * d - 5.0f;
+
+				glm::vec3 grad_x {2 * d, 0, 0};
+				if (x > 0 && x < normals_res - 1) {
+					float y1 = eval(x_ + eps, z_);
+					float y2 = eval(x_ - eps, z_);
+
+					grad_x.y = (y1 - y2) / (2 * eps);
+				}
+
+				glm::vec3 grad_z {0, 0, 2 * d};
+				if (y > 0 && y < normals_res - 1) {
+					float y1 = eval(x_, z_ + eps);
+					float y2 = eval(x_, z_ - eps);
+
+					grad_z.y = (y1 - y2) / (2 * eps);
+				}
+
+				glm::vec3 n = -glm::normalize(glm::cross(grad_x, grad_z));
+				normals[x * normals_res + y] = (n * 0.5f + 0.5f);
+			}
+		}
+	}
+public:
+	unsigned int	t_height;
+	unsigned int	t_normal;
+
+	// Constructor
+	HeightMap(int resolution, float frequency, int octaves)
+			: data_res(resolution), normals_res(2 * resolution) {
+		// Allocate memory for heightmap
+		data = new float[data_res * data_res];
+		normals = new glm::vec3[normals_res * normals_res];
+
+		// Generate heightmap and normals
+		generate_heightmap(frequency, octaves);
+		generate_normals();
+
+		// Convert to byte array
+		uint8_t *image = new uint8_t[resolution * resolution];
+		for (int i = 0; i < resolution * resolution; i++)
+			image[i] = (uint8_t) (data[i] * std::numeric_limits <uint8_t> ::max());
+
+
+		// Create heightmap texture
+		// TODO: using data instead of image produces grass-like terrain
+		glGenTextures(1, &t_height);
+		glBindTexture(GL_TEXTURE_2D, t_height);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, image);
+		glBindImageTexture(1, t_height, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+
+		// Create normal texture
+		glGenTextures(1, &t_normal);
+		glBindTexture(GL_TEXTURE_2D, t_normal);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, normals_res, normals_res, 0, GL_RGB, GL_FLOAT, normals);
+		glBindImageTexture(2, t_normal, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
+
+		// Unbind textures
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		// Free memory
+		delete[] data;
+		delete[] normals;
+	}
 };
 
 // Application state
 State state;
+
+// Shaders
+struct Shaders {
+	unsigned int pixelizer;
+	unsigned int texturizer;
+
+	// Construction
+	Shaders() {
+		// Pixelizer
+		unsigned int shader = compile_shader("shaders/pixelizer.glsl", GL_COMPUTE_SHADER);
+
+		pixelizer = glCreateProgram();
+		glAttachShader(pixelizer, shader);
+
+		// Link shaders.pixelizer
+		if (!link_program(pixelizer))
+			throw std::runtime_error("Failed to link pixelizer shaders.pixelizer");
+
+		// Texturizer
+		unsigned int vertex_shader = compile_shader("shaders/texture.vert", GL_VERTEX_SHADER);
+		unsigned int fragment_shader = compile_shader("shaders/texture.frag", GL_FRAGMENT_SHADER);
+
+		// Create shaders.pixelizer
+		texturizer = glCreateProgram();
+		glAttachShader(texturizer, vertex_shader);
+		glAttachShader(texturizer, fragment_shader);
+
+		// Link shaders.pixelizer
+		if (!link_program(texturizer))
+			throw std::runtime_error("Failed to link texturizer shaders.pixelizer");
+
+		// Delete shaders
+		glDeleteShader(shader);
+		glDeleteShader(vertex_shader);
+		glDeleteShader(fragment_shader);
+	}
+
+	// Destruction
+	~Shaders() {
+		glDeleteProgram(pixelizer);
+		glDeleteProgram(texturizer);
+	}
+};
+
+// TODO: bvh per 3-cluster of quads
 
 int main()
 {
@@ -80,89 +260,9 @@ int main()
 	// Bind texture as image
 	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
-	// Create texture for height map
-	// TODO: struct for height map and resources
-	unsigned int heightmap;
-	unsigned int heightmap_normals;
-
-	int resolution = 512;
-
-	float *heightmap_data = new float[resolution * resolution];
-	glm::vec3 *heightmap_normals_data = new glm::vec3[resolution * resolution];
-
-	srand(clock());
-	uint32_t seed = rand();
-	const siv::PerlinNoise perlin {seed};
-	float frequency = 1.0f;
-	const double f = (frequency / resolution);
-
-	for (int i = 0; i < resolution * resolution; i++) {
-		int x = i % resolution;
-		int y = i / resolution;
-		heightmap_data[i] = perlin.octave2D_01(x * f, y * f, 4);
-	}
-
-	// Compute normals
-	for (int x = 0; x < resolution; x++) {
-		for (int y = 0; y < resolution; y++) {
-			float d = 10.0f/resolution;
-
-			glm::vec3 grad_x {2 * d, 0, 0};
-			if (x > 0 && x < resolution - 1) {
-				float y1 = heightmap_data[(x - 1) * resolution + y];
-				float y2 = heightmap_data[(x + 1) * resolution + y];
-
-				grad_x.y = (y2 - y1) / (2 * d);
-			}
-
-			glm::vec3 grad_z {0, 0, 2 * d};
-			if (y > 0 && y < resolution - 1) {
-				float y1 = heightmap_data[x * resolution + y - 1];
-				float y2 = heightmap_data[x * resolution + y + 1];
-
-				grad_z.y = (y2 - y1) / (2 * d);
-			}
-
-			glm::vec3 n = glm::normalize(glm::cross(grad_x, grad_z));
-			heightmap_normals_data[x * resolution + y] = (-n * 0.5f + 0.5f);
-		}
-	}
-
-	unsigned char *heightmap_image = new unsigned char[resolution * resolution];
-	for (int i = 0; i < resolution * resolution; i++)
-		heightmap_image[i] = (unsigned char) (heightmap_data[i] * 255.0f);
-
-	// Create and bind texture (binding 1)
-	glGenTextures(1, &heightmap);
-	glBindTexture(GL_TEXTURE_2D, heightmap);
-
-	// Set texture parameters
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	// Texture data
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, heightmap_image);
-
-	// Bind texture as sampler
-	glBindImageTexture(1, heightmap, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
-
-	// Create and bind texture (binding 2)
-	glGenTextures(1, &heightmap_normals);
-	glBindTexture(GL_TEXTURE_2D, heightmap_normals);
-
-	// Set texture parameters
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	// Texture data
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, resolution, resolution, 0, GL_RGB, GL_FLOAT, heightmap_normals_data);
-
-	// Bind texture as sampler
-	glBindImageTexture(2, heightmap_normals, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
+	// Create heightmap
+	size_t seed;
+	HeightMap heightmap(128, 1.0f, 4);
 
 	// Cloud density
 	srand(clock());
@@ -174,6 +274,8 @@ int main()
 	unsigned char *cloud_density_image = new unsigned char[cloud_resolution * cloud_resolution];
 
 	glm::vec2 cloud_offset {0.0f, 0.0f};
+
+	float f = (1.0f/cloud_resolution);
 	for (int i = 0; i < cloud_resolution * cloud_resolution; i++) {
 		int x = i % cloud_resolution;
 		int y = i / cloud_resolution;
@@ -200,32 +302,62 @@ int main()
 	// Bind texture as sampler
 	glBindImageTexture(3, cloud_density, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
 
-	// Read shader source
-	unsigned int shader = compile_shader("shaders/pixelizer.glsl", GL_COMPUTE_SHADER);
+	// Grass texture
+	const char *grass_texture_path = "grass.png";
 
-	// Create program
-	unsigned int program = glCreateProgram();
-	glAttachShader(program, shader);
+	int grass_texture_width, grass_texture_height;
 
-	// Link program
-	if (!link_program(program))
+	// Enable flipping the image vertically
+	stbi_set_flip_vertically_on_load(true);
+	unsigned char *grass_texture_data = stbi_load(
+		grass_texture_path,
+		&grass_texture_width,
+		&grass_texture_height,
+		nullptr, STBI_rgb_alpha
+	);
+
+	if (!grass_texture_data) {
+		std::cout << "Failed to load grass texture" << std::endl;
 		return -1;
+	} else {
+		std::cout << "Loaded grass texture" << std::endl;
+	}
 
-	// Delete shaders
-	glDeleteShader(shader);
+	// Create and bind texture (binding 4)
+	unsigned int grass_texture;
+	glGenTextures(1, &grass_texture);
+	glBindTexture(GL_TEXTURE_2D, grass_texture);
+
+	// Set texture parameters
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	// Texture data
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, grass_texture_width, grass_texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, grass_texture_data);
+
+	// Bind texture as sampler
+	glBindImageTexture(4, grass_texture, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
+
+	// Create shaders
+	Shaders shaders;
 
 	glm::vec3 origin {0, 5, -5};
 	glm::vec3 lookat {0, 2, 0};
 	glm::vec3 up {0, 1, 0};
 
-	set_int(program, "width", WIDTH);
-	set_int(program, "height", HEIGHT);
-	set_int(program, "pixel", PIXEL_SIZE);
-	set_int(program, "clouds", state.show_clouds);
-	set_int(program, "normals", state.show_normals);
+	set_int(shaders.pixelizer, "width", WIDTH);
+	set_int(shaders.pixelizer, "height", HEIGHT);
+	set_int(shaders.pixelizer, "pixel", PIXEL_SIZE);
+	set_int(shaders.pixelizer, "clouds", state.show_clouds);
+	set_int(shaders.pixelizer, "normals", state.show_normals);
+	set_float(shaders.pixelizer, "ray_marching_step", state.ray_marching_step);
+	set_float(shaders.pixelizer, "ray_shadow_step", state.ray_shadow_step);
+	set_float(shaders.pixelizer, "terrain_size", state.terrain_size);
 
 	camera = Camera {origin, lookat, up};
-	camera.send_to_shader(program);
+	camera.send_to_shader(shaders.pixelizer);
 
 	// Set up vertex data
 	float vs[] = {
@@ -257,21 +389,6 @@ int main()
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
 
-	// Compile respective shaders
-	unsigned int vertex_shader = compile_shader("shaders/texture.vert", GL_VERTEX_SHADER);
-	unsigned int fragment_shader = compile_shader("shaders/texture.frag", GL_FRAGMENT_SHADER);
-
-	// Create program
-	unsigned int program_texture = glCreateProgram();
-	glAttachShader(program_texture, vertex_shader);
-	glAttachShader(program_texture, fragment_shader);
-
-	// Link program
-	if (!link_program(program_texture))
-		return -1;
-
-	// TODO: group all the shaders into a struct
-
 	// Vertices of tile
 	Mesh tile = generate_tile(5);
 
@@ -295,13 +412,13 @@ int main()
 	unsigned int ssbo_indices = make_ssbo(indices, 2);
 	unsigned int ssbo_bvh = make_ssbo(bvh_buffer, 3);
 
-	set_int(program, "primitives", tile.triangles.size());
-	// set_int(program, "primitives", 0);
+	set_int(shaders.pixelizer, "primitives", tile.triangles.size());
+	// set_int(shaders.pixelizer, "primitives", 0);
 
 	std::cout << "Buffer size = " << bvh_buffer.size() << std::endl;
 	std::cout << "Triangles = " << tile.triangles.size() << std::endl;
 
-	set_vec3(program, "light_dir", glm::normalize( glm::vec3 {1, 1, 1} ));
+	set_vec3(shaders.pixelizer, "light_dir", glm::normalize( glm::vec3 {1, 1, 1} ));
 
 	// Loop until the user closes the window
 	float cloud_time = 0;
@@ -336,7 +453,7 @@ int main()
 			dy += speed;
 
 		camera.move(dx, dy, dz);
-		camera.send_to_shader(program);
+		camera.send_to_shader(shaders.pixelizer);
 
 		// Tab to toggle viewing mode
 		if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && !state.tab) {
@@ -376,20 +493,22 @@ int main()
 		float y = glm::sin(st);
 		float x = glm::cos(st);
 
-		set_vec3(program, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
+		set_vec3(shaders.pixelizer, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
 		sun_time = std::fmod(sun_time + t/1000.0f, 2 * glm::pi <float>()); */
 
 		// Ray tracing
 		{
-			// Bind program and dispatch
-			glUseProgram(program);
+			// Bind shaders.pixelizer and dispatch
+			glUseProgram(shaders.pixelizer);
 
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, heightmap);
+			glBindTexture(GL_TEXTURE_2D, heightmap.t_height);
 			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D, heightmap_normals);
+			glBindTexture(GL_TEXTURE_2D, heightmap.t_normal);
 			glActiveTexture(GL_TEXTURE2);
 			glBindTexture(GL_TEXTURE_2D, cloud_density);
+			glActiveTexture(GL_TEXTURE3);
+			glBindTexture(GL_TEXTURE_2D, grass_texture);
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vertices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
@@ -403,8 +522,8 @@ int main()
 
 		// Render texture
 		{
-			// Bind program and draw
-			glUseProgram(program_texture);
+			// Bind shaders.pixelizer and draw
+			glUseProgram(shaders.texturizer);
 
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, texture);
@@ -418,13 +537,15 @@ int main()
 			ImGui_ImplGlfw_NewFrame();
 			ImGui_ImplOpenGL3_NewFrame();
 			ImGui::NewFrame();
-			
+
 			// Settings window
 			{
 				ImGui::Begin("Settings");
 				ImGui::Checkbox("Show triangles", &state.show_triangles);
 				ImGui::Checkbox("Show clouds", &state.show_clouds);
 				ImGui::Checkbox("Show normals", &state.show_normals);
+				ImGui::SliderFloat("Ray marching step", &state.ray_marching_step, 1e-3f, 1.0f, "%.3g", 1 << 5);
+				ImGui::SliderFloat("Ray shadow step", &state.ray_shadow_step, 1e-3f, 1.0f, "%.3g", 1 << 5);
 				ImGui::End();
 			}
 
@@ -439,13 +560,15 @@ int main()
 			ImGui::Render();
 			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 		}
-		
+
 		// Apply settings
 		int primitives = state.show_triangles * tile.triangles.size();
-		set_int(program, "primitives", primitives);
+		set_int(shaders.pixelizer, "primitives", primitives);
 
-		set_int(program, "clouds", state.show_clouds);
-		set_int(program, "normals", state.show_normals);
+		set_int(shaders.pixelizer, "clouds", state.show_clouds);
+		set_int(shaders.pixelizer, "normals", state.show_normals);
+		set_float(shaders.pixelizer, "ray_marching_step", state.ray_marching_step);
+		set_float(shaders.pixelizer, "ray_shadow_step", state.ray_shadow_step);
 
 		// Swap front and back buffers
 		glfwSwapBuffers(window);

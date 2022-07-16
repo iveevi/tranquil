@@ -20,12 +20,17 @@ layout (binding = 1) uniform sampler2D s_heightmap_normal;
 layout (binding = 2) uniform sampler2D s_clouds;
 layout (binding = 3) uniform sampler2D s_grass;
 
+uniform float ray_marching_step;
+uniform float ray_shadow_step;
+uniform float terrain_size;
+
 uniform int clouds;
-uniform int normals;
 uniform int height;
+uniform int normals;
 uniform int pixel;
 uniform int primitives;
 uniform int width;
+
 uniform vec3 light_dir;
 
 struct Camera {

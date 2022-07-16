@@ -92,6 +92,7 @@ inline std::string read_glsl(const std::string &path)
 int compile_shader(const char *, unsigned int);
 int link_program(unsigned int);
 void set_int(unsigned int, const char *, int);
+void set_float(unsigned int, const char *, float);
 void set_vec3(unsigned int, const char *, const glm::vec3 &);
 
 // Camera stuff
@@ -394,11 +395,14 @@ inline Mesh generate_tile(int resolution)
 
 // State for the application
 struct State {
-	bool show_clouds = true;
+	bool show_clouds = false;
 	bool show_normals = false;
-	bool show_triangles = true;
+	bool show_triangles = false;
 	bool tab = false;
 	bool viewing_mode = false;
+	float ray_marching_step = 0.01f;
+	float ray_shadow_step = 0.001f;
+	const float terrain_size = 20.0f;
 
 	// TODO: method to apply settings if changed
 };

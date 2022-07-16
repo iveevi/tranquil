@@ -8,20 +8,24 @@ uint ePillar = 3;
 const float PI = 3.14159265358979323846f;
 const float fov = 60.0f;
 
-// Intersection between ray and height map
-const float hmap_width = 10.0f;
-const float hmap_height = 10.0f;
+// Terrain properties
 
 // x and z range
-const float xmin = -hmap_width * 0.5f;
-const float xmax = hmap_width * 0.5f;
+// TODO: concat into vec2s
+float xmin = -terrain_size * 0.5f;
+float xmax = terrain_size * 0.5f;
 
-const float zmin = -hmap_height * 0.5f;
-const float zmax = hmap_height * 0.5f;
+float zmin = -terrain_size * 0.5f;
+float zmax = terrain_size * 0.5f;
 
+// Height scaling
 float scale = 2.0f;
 
 // Shading
-// const vec3 light_dir = normalize(vec3(0.5, 0.5, 0.5));
 const vec3 light_intensity = vec3(1, 1, 0.8);
 
+// Terrain uv
+vec2 terrain_uv(vec2 xz)
+{
+	return (xz - vec2(xmin, zmin)) / vec2(terrain_size);
+}

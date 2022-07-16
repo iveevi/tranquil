@@ -46,7 +46,7 @@ void main()
 
 				if (t > 0 && x > xmin && x < xmax && z > zmin && z < zmax) {
 					// TODO: function to get terrain uv coordinate
-					vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+					vec2 uv = terrain_uv(vec2(x, z));
 					float cloud = texture(s_clouds, uv).x;
 
 					if (cloud > 0.2f) {
