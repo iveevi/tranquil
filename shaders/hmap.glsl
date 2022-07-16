@@ -26,7 +26,7 @@ float hmap_derivative(Ray r, float t)
 	return dy_dt;
 }
 
-float _intersect_heightmap(Ray r)
+Intersection intersect_heightmap(Ray r)
 {
 
 	// Solve for the time when ray intrsects
@@ -44,7 +44,7 @@ float _intersect_heightmap(Ray r)
 	// Find when y = 0
 	float t5 = (0 - r.p.y) / r.d.y;
 	if (tmax < 0.0f || tmin < 0.0f)
-		return -1.0f;
+		return def_it();
 
 	// Brute search for the intersection
 	vec3 p = r.p + r.d * tmin;
@@ -61,7 +61,40 @@ float _intersect_heightmap(Ray r)
 			y = hmap(p.x, p.z);
 			if (y >= p.y) {
 				// Interpolate distance
-				return t - dt + dt * (lh - ly)/(p.y - ly - y + lh);
+				t += dt * (lh - ly)/(p.y - ly - y + lh) - dt;
+
+				Intersection it;
+				it.id = primitives;
+				it.t = t;
+				it.p = r.p + r.d * t;
+				it.n = hmap_normal(p.x, p.z);
+				it.shading = eGrass;
+				return it;
+			}
+
+			ly = p.y;
+			lh = y;
+		}
+	} else {
+		float dt = 0.1f;
+
+		float lh = 0.0f;
+		float ly = 0.0f;
+
+		for (float t = tmin; t < tmax; t += dt) {
+			p = r.p + r.d * t;
+			y = hmap(p.x, p.z);
+			if (y < p.y) {
+				// Interpolate distance
+				t += dt * (lh - ly)/(p.y - ly - y + lh) - dt;
+
+				Intersection it;
+				it.id = primitives;
+				it.t = t;
+				it.p = r.p + r.d * t;
+				it.n = -hmap_normal(p.x, p.z);
+				it.shading = eGrass;
+				return it;
 			}
 
 			ly = p.y;
@@ -70,6 +103,20 @@ float _intersect_heightmap(Ray r)
 	}
 
 	// Everything under is not visible
-	return -1.0f;
+	return def_it();
 }
 
+/* Intersection intersect_heightmap(Ray r)
+{
+	float t = _intersect_heightmap(r);
+	if (t < 0.0f)
+		return def_it();
+
+	Intersection it;
+	it.id = 0;
+	it.t = t;
+	it.p = r.p + r.d * t;
+	it.n = hmap_normal(it.p.x, it.p.z);
+	it.shading = eGrass;
+	return it;
+} */

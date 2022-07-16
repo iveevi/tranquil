@@ -3,223 +3,63 @@
 #include <PerlinNoise.hpp>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb/stb_image.h>
 #include <stb/stb_image_write.h>
 
-// Generate pillar mesh
-Mesh generate_pillar(const glm::mat4 &transform)
-{
-	Mesh box;
-
-	// Properties
-	glm::vec4 center_ = transform * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-	glm::vec3 dx = transform * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) - center_;
-	glm::vec3 dy = transform * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) - center_;
-	glm::vec3 dz = transform * glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) - center_;
-
-	// Vertices
-	glm::vec3 center = glm::vec3(center_);
-	glm::vec3 v1 = center + dx/2.0f + dy/2.0f + dz/2.0f;
-	glm::vec3 v2 = center + dx/2.0f + dy/2.0f - dz/2.0f;
-	glm::vec3 v3 = center + dx/2.0f - dy/2.0f - dz/2.0f;
-	glm::vec3 v4 = center + dx/2.0f - dy/2.0f + dz/2.0f;
-	glm::vec3 v5 = center - dx/2.0f + dy/2.0f + dz/2.0f;
-	glm::vec3 v6 = center - dx/2.0f + dy/2.0f - dz/2.0f;
-	glm::vec3 v7 = center - dx/2.0f - dy/2.0f - dz/2.0f;
-	glm::vec3 v8 = center - dx/2.0f - dy/2.0f + dz/2.0f;
-
-	// Push vertices
-	box.vertices = {
-		Vertex {v1}, Vertex {v2}, Vertex {v3}, Vertex {v4},
-		Vertex {v5}, Vertex {v6}, Vertex {v7}, Vertex {v8}
-	};
-
-	// Indices
-	box.triangles = std::vector <Triangle> {
-		Triangle {0, 1, 2, Shades::ePillar}, Triangle {0, 2, 3, Shades::ePillar},
-		Triangle {4, 5, 6, Shades::ePillar}, Triangle {4, 6, 7, Shades::ePillar},
-		Triangle {0, 1, 5, Shades::ePillar}, Triangle {0, 5, 4, Shades::ePillar},
-		Triangle {1, 2, 6, Shades::ePillar}, Triangle {1, 6, 5, Shades::ePillar},
-		Triangle {2, 3, 7, Shades::ePillar}, Triangle {2, 7, 6, Shades::ePillar},
-		Triangle {3, 0, 4, Shades::ePillar}, Triangle {3, 4, 7, Shades::ePillar}
-	};
-
-	return box;
-}
-
-// Generate terrain tile mesh
-// TODO: try to optimizde the resulting mesh (low deltas could be merged)
-Mesh generate_terrain(int resolution)
-{
-	float width = 10.0f;
-	float height = 10.0f;
-
-	// Height map
-	size_t mapres = resolution + 1;
-	std::vector <float> height_map(mapres * mapres);
-
-	srand(clock());
-	for (size_t i = 0; i < mapres * mapres; i++)
-		height_map[i] = randf() * 1.0f;
-
-	float slice = width/resolution;
-
-	float x = -width/2.0f;
-	float z = -height/2.0f;
-
-	Mesh tile;
-	for (int i = 0; i <= resolution; i++) {
-		for (int j = 0; j <= resolution; j++) {
-			Vertex vertex;
-			vertex.position = glm::vec3(x, height_map[i * resolution + j], z);
-			tile.vertices.push_back(vertex);
-			x += slice;
-		}
-
-		x = -width/2.0f;
-		z += slice;
-	}
-
-	// Generate indices
-	for (int i = 0; i < resolution; i++) {
-		for (int j = 0; j < resolution; j++) {
-			// Indices of square
-			uint32_t a = i * (resolution + 1) + j;
-			uint32_t b = (i + 1) * (resolution + 1) + j;
-			uint32_t c = (i + 1) * (resolution + 1) + j + 1;
-			uint32_t d = i * (resolution + 1) + j + 1;
-
-			// Push
-			tile.triangles.push_back(Triangle {a, b, c, Shades::eGrass});
-			tile.triangles.push_back(Triangle {a, c, d, Shades::eGrass});
-		}
-	}
-
-	return tile;
-}
-
-// Generate a scene tile
-Mesh generate_tile(int resolution)
-{
-	// Generate terrain tile
-	// TODO: pass height map
-	// Mesh tile = generate_terrain(resolution);
-	Mesh tile;
-
-	// Add random columns
-	int nboxes = rand() % 5 + 5;
-	for (int i = 0; i < nboxes; i++) {
-		// Random size
-		float width = randf() * 0.6f + 0.5f;
-		float depth = randf() * 0.6f + 0.5f;
-		float height = randf() * 2.0f + 0.5f;
-
-		// Random position within the tile
-		float x = randf(-4.5, 4.5);
-		float z = randf(-4.5, 4.5);
-		float y = height / 2.0f + randf();
-
-		// Random rotation
-		float rx = randf() * 15.0f;
-		float ry = randf() * 360.0f;
-		float rz = randf() * 15.0f;
-
-		// Generate box
-		glm::mat4 mat = Transform {
-			glm::vec3(x, y, z),
-			glm::vec3(rx, ry, rz),
-			glm::vec3(width, height, depth)
-		}.matrix();
-
-		// Add box
-		tile.add(generate_pillar(mat));
-	}
-
-	return tile;
-}
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 
 // Camera and mouse handling
 Camera camera;
 
-void mouse_callback(GLFWwindow *window, double xpos, double ypos)
+template <class T>
+unsigned int make_ssbo(const std::vector <T> &data, int binding)
 {
-	static double last_x = WIDTH/2.0;
-	static double last_y = HEIGHT/2.0;
+	unsigned int ssbo;
 
-	static float sensitivity = 0.001f;
+	// Create storage buffer object
+	glGenBuffers(1, &ssbo);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(T) * data.size(), data.data(), GL_STATIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, binding);
 
-	static bool first_mouse = true;
-
-	static float yaw = 0.0f;
-	static float pitch = 0.0f;
-	
-	if (first_mouse) {
-		last_x = xpos;
-		last_y = ypos;
-		first_mouse = false;
-	}
-	
-	double xoffset = last_x - xpos;
-	double yoffset = last_y - ypos;
-
-	last_x = xpos;
-	last_y = ypos;
-	
-	xoffset *= sensitivity;
-	yoffset *= sensitivity;
-
-	yaw += xoffset;
-	pitch += yoffset;
-
-	// Clamp pitch
-	if (pitch > 89.0f)
-		pitch = 89.0f;
-	if (pitch < -89.0f)
-		pitch = -89.0f;
-
-	camera.set_yaw_pitch(yaw, pitch);
+	return ssbo;
 }
 
-GLFWwindow *initialize_graphics()
+// TODO: use in initialize graphics
+void initialize_imgui(GLFWwindow *window)
 {
-	// Basic window
-	GLFWwindow *window = nullptr;
-	if (!glfwInit())
-		return nullptr;
+	// Setup Dear ImGui context
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void) io;
+	//io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+	//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
-	window = glfwCreateWindow(WIDTH, HEIGHT, "Weaxor", NULL, NULL);
+	// Setup Dear ImGui style
+	ImGui::StyleColorsDark();
+	//ImGui::StyleColorsLight();
 
-	// Check if window was created
-	if (!window) {
-		glfwTerminate();
-		return nullptr;
-	}
-
-	// Make the window's context current
-	glfwMakeContextCurrent(window);
-
-	// Load OpenGL functions using GLAD
-	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-		printf("Failed to initialize OpenGL context\n");
-		return nullptr;
-	}
-
-	// Set up callbacks
-	glfwSetCursorPosCallback(window, mouse_callback);
-
-	// Cursor is disabled by default
-	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-
-	const GLubyte* renderer = glGetString(GL_RENDERER);
-
-	printf("Renderer: %s\n", renderer);
-	return window;
+	// Setup Platform/Renderer backends
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init("#version 430");
 }
+
+// Struct for managing data for the heightmap
+struct HeightMap {
+};
+
+// Application state
+State state;
 
 int main()
 {
 	GLFWwindow *window = initialize_graphics();
 	if (!window)
 		return -1;
+
+	initialize_imgui(window);
 
 	// Create texture for output
 	unsigned int texture;
@@ -253,7 +93,7 @@ int main()
 	srand(clock());
 	uint32_t seed = rand();
 	const siv::PerlinNoise perlin {seed};
-	float frequency = 2.0f;
+	float frequency = 1.0f;
 	const double f = (frequency / resolution);
 
 	for (int i = 0; i < resolution * resolution; i++) {
@@ -381,6 +221,8 @@ int main()
 	set_int(program, "width", WIDTH);
 	set_int(program, "height", HEIGHT);
 	set_int(program, "pixel", PIXEL_SIZE);
+	set_int(program, "clouds", state.show_clouds);
+	set_int(program, "normals", state.show_normals);
 
 	camera = Camera {origin, lookat, up};
 	camera.send_to_shader(program);
@@ -428,6 +270,8 @@ int main()
 	if (!link_program(program_texture))
 		return -1;
 
+	// TODO: group all the shaders into a struct
+
 	// Vertices of tile
 	Mesh tile = generate_tile(5);
 
@@ -446,34 +290,13 @@ int main()
 	for (const auto &i : indices)
 		std::cout << "\t" << i << std::endl; */
 
-	// Create storage buffer for tile vertices
-	unsigned int ssbo;
-
-	// Create storage buffer object
-	glGenBuffers(1, &ssbo);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(aligned_vec4) * vertices.size(), vertices.data(), GL_STATIC_DRAW);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 1);
-
-	// Create storage buffer for tile indices
-	unsigned int issbo;
-
-	// Create storage buffer object
-	glGenBuffers(1, &issbo);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, issbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(aligned_uvec4) * indices.size(), indices.data(), GL_STATIC_DRAW);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 2);
-
-	// Create storage buffer for BVH
-	unsigned int bsbo;
-
-	// Create storage buffer object
-	glGenBuffers(1, &bsbo);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, bsbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(aligned_vec4) * bvh_buffer.size(), bvh_buffer.data(), GL_STATIC_DRAW);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, 3);
+	// Store buffers for vertices, indices and BVH
+	unsigned int ssbo_vertices = make_ssbo(vertices, 1);
+	unsigned int ssbo_indices = make_ssbo(indices, 2);
+	unsigned int ssbo_bvh = make_ssbo(bvh_buffer, 3);
 
 	set_int(program, "primitives", tile.triangles.size());
+	// set_int(program, "primitives", 0);
 
 	std::cout << "Buffer size = " << bvh_buffer.size() << std::endl;
 	std::cout << "Triangles = " << tile.triangles.size() << std::endl;
@@ -490,7 +313,7 @@ int main()
 			glfwSetWindowShouldClose(window, GL_TRUE);
 			continue;
 		}
-		
+
 		float t = glfwGetTime();
 
 		// Move camera
@@ -500,7 +323,7 @@ int main()
 		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
 			dz += speed;
 		else if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-			dz -= speed;	
+			dz -= speed;
 
 		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
 			dx += speed;
@@ -515,19 +338,31 @@ int main()
 		camera.move(dx, dy, dz);
 		camera.send_to_shader(program);
 
+		// Tab to toggle viewing mode
+		if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS && !state.tab) {
+			state.viewing_mode = !state.viewing_mode;
+			unsigned int cursor_mode = state.viewing_mode ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL;
+			glfwSetInputMode(window, GLFW_CURSOR, cursor_mode);
+			state.tab = true;
+		} else if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_RELEASE) {
+			state.tab = false;
+		}
+
 		// Update cloud density every so often
 		cloud_time += t;
 
 		if (cloud_time > 0.2f) {
 			cloud_time = 0;
-		
+
 			cloud_offset += 0.005f;
 
+			float frequency = 8.0f;
+			const double f = (frequency/cloud_resolution);
 			for (int i = 0; i < cloud_resolution * cloud_resolution; i++) {
 				int x = i % cloud_resolution;
 				int y = i / cloud_resolution;
 
-				float density = perlin_cloud.octave2D_01(x * f + cloud_offset.x, y * f + cloud_offset.y, 4);
+				float density = perlin_cloud.octave2D_01(x * f + cloud_offset.x, y * f + cloud_offset.y, 16);
 				cloud_density_image[i] = (unsigned char) (density * 250.0f + 1);
 			}
 
@@ -536,13 +371,13 @@ int main()
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cloud_resolution, cloud_resolution, 0, GL_RED, GL_UNSIGNED_BYTE, cloud_density_image);
 		}
 
-		// Update sun direction, should lie on the x = z plane
+		/* Update sun direction, should lie on the x = z plane
 		float st = sun_time;
 		float y = glm::sin(st);
 		float x = glm::cos(st);
 
 		set_vec3(program, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
-		sun_time = std::fmod(sun_time + t/1000.0f, 2 * glm::pi <float>());
+		sun_time = std::fmod(sun_time + t/1000.0f, 2 * glm::pi <float>()); */
 
 		// Ray tracing
 		{
@@ -556,9 +391,9 @@ int main()
 			glActiveTexture(GL_TEXTURE2);
 			glBindTexture(GL_TEXTURE_2D, cloud_density);
 
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo);
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, issbo);
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, bsbo);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vertices);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, ssbo_bvh);
 
 			glDispatchCompute(WIDTH/PIXEL_SIZE, HEIGHT/PIXEL_SIZE, 1);
 		}
@@ -577,6 +412,40 @@ int main()
 			glBindVertexArray(vao);
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 		}
+
+		// ImGui
+		if (!state.viewing_mode) {
+			ImGui_ImplGlfw_NewFrame();
+			ImGui_ImplOpenGL3_NewFrame();
+			ImGui::NewFrame();
+			
+			// Settings window
+			{
+				ImGui::Begin("Settings");
+				ImGui::Checkbox("Show triangles", &state.show_triangles);
+				ImGui::Checkbox("Show clouds", &state.show_clouds);
+				ImGui::Checkbox("Show normals", &state.show_normals);
+				ImGui::End();
+			}
+
+			// Info window
+			{
+				ImGui::Begin("Info");
+				ImGui::Text("framerate: %.1f", ImGui::GetIO().Framerate);
+				ImGui::Text("primitives: %lu", tile.triangles.size());
+				ImGui::End();
+			}
+
+			ImGui::Render();
+			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		}
+		
+		// Apply settings
+		int primitives = state.show_triangles * tile.triangles.size();
+		set_int(program, "primitives", primitives);
+
+		set_int(program, "clouds", state.show_clouds);
+		set_int(program, "normals", state.show_normals);
 
 		// Swap front and back buffers
 		glfwSwapBuffers(window);

@@ -24,28 +24,36 @@ void main()
 
 	// Intersection it = intersect_heightmap(r);
 	Intersection it = trace(r);
-	if (it.id != -1) {
-		color = shade(it);
-		// color.xyz = it.n * 0.5 + 0.5;
+
+	if (normals == 1) {
+		color = vec4(0, 0, 0, 1.0);
+		if (it.id != -1)
+			color.xyz = it.n * 0.5 + 0.5;
 	} else {
-		// Possibility of clouds (TODO: shade clouds)
-		
-		// Solve for ray pos at 20
-		float h = 7.0f;
-		float t = (h - r.p.y) / r.d.y;
-		vec3 pos = r.p + t * r.d;
+		if (it.id != -1) {
+			color = shade(it);
+			// color.xyz = it.n * 0.5 + 0.5;
+		} else {
+			// Possibility of clouds (TODO: shade clouds)
+			if (clouds == 1) {	
+				// Solve for ray pos at 20
+				float h = 7.0f;
+				float t = (h - r.p.y) / r.d.y;
+				vec3 pos = r.p + t * r.d;
 
-		float x = pos.x;
-		float z = pos.z;
+				float x = pos.x;
+				float z = pos.z;
 
-		if (t > 0 && x > xmin && x < xmax && z > zmin && z < zmax) {
-			// TODO: function to get terrain uv coordinate
-			vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
-			float cloud = texture(s_clouds, uv).x;
+				if (t > 0 && x > xmin && x < xmax && z > zmin && z < zmax) {
+					// TODO: function to get terrain uv coordinate
+					vec2 uv = (vec2(x, z) - vec2(xmin, zmin)) / vec2(hmap_width, hmap_height);
+					float cloud = texture(s_clouds, uv).x;
 
-			if (cloud > 0.2f) {
-				vec4 c = vec4(0, 0, 0, 1.0);
-				color = mix(color, c, cloud);
+					if (cloud > 0.2f) {
+						vec4 c = vec4(0.3, 0.3, 0.3, 1.0);
+						color = mix(color, c, cloud);
+					}
+				}
 			}
 		}
 	}

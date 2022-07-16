@@ -1,9 +1,4 @@
 // Generate default intersection
-Intersection def_it()
-{
-	return Intersection(1.0/0.0, vec3(0.0), vec3(0.0), -1, eNone);
-}
-
 Intersection _intersect(Ray r, Triangle tri, uint shading)
 {
 	float t = _intersect_time(r, tri);
@@ -32,21 +27,6 @@ Intersection intersect(Ray r, int i)
 	);
 
 	return  _intersect(r, t, tri.w);
-}
-
-Intersection intersect_heightmap(Ray r)
-{
-	float t = _intersect_heightmap(r);
-	if (t < 0.0f)
-		return def_it();
-
-	Intersection it;
-	it.id = 0;
-	it.t = t;
-	it.p = r.p + r.d * t;
-	it.n = hmap_normal(it.p.x, it.p.z);
-	it.shading = eGrass;
-	return it;
 }
 
 Intersection trace(Ray ray)

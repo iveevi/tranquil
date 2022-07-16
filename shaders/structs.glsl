@@ -50,11 +50,16 @@ struct Intersection {
 	vec3 p;
 	vec3 n;
 	int id;
-	uint shading;
+	uint shading;	// For color palette
 };
+
+// Default constructor
+Intersection def_it()
+{
+	return Intersection(1.0/0.0, vec3(0.0), vec3(0.0), -1, eNone);
+}
 
 struct BoundingBox {
 	vec3 pmin;
 	vec3 pmax;
 };
-

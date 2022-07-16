@@ -67,7 +67,10 @@ vec4 shade(Intersection it)
 		cloud_density = texture(s_clouds, uv).r;
 	}
 
-	float kcloud = max((1 - cloud_density), 0.1);
+	float kcloud = 1.0f;
+	if (clouds == 1)
+		kcloud = max((1 - cloud_density), 0.1);
+
 	if (shadow_it.id == -1)
 		color += light_intensity * ds * kcloud;
 	else

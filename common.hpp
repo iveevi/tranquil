@@ -88,6 +88,7 @@ inline std::string read_glsl(const std::string &path)
 	return source;
 }
 
+// GLFW and OpenGL helpers
 int compile_shader(const char *, unsigned int);
 int link_program(unsigned int);
 void set_int(unsigned int, const char *, int);
@@ -142,6 +143,9 @@ struct Camera {
 };
 
 extern Camera camera;
+
+void mouse_callback(GLFWwindow *, double, double);
+GLFWwindow *initialize_graphics();
 
 // TODO: add info about normals
 // TODO: use indices and another vertex structure
@@ -237,8 +241,8 @@ struct Transform {
 	glm::vec3 scale;
 
 	Transform(const glm::vec3 &pos_ = glm::vec3(0.0f),
-			  const glm::vec3 &rot_ = glm::vec3(0.0f),
-			  const glm::vec3 &scale_ = glm::vec3(1.0f))
+			const glm::vec3 &rot_ = glm::vec3(0.0f),
+			const glm::vec3 &scale_ = glm::vec3(1.0f))
 			: pos(pos_), rot(rot_), scale(scale_) {}
 
 	glm::mat4 matrix() {
@@ -254,5 +258,151 @@ struct Transform {
 		return mat;
 	}
 };
+
+// Generate pillar mesh
+inline Mesh generate_pillar(const glm::mat4 &transform)
+{
+	Mesh box;
+
+	// Properties
+	glm::vec4 center_ = transform * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	glm::vec3 dx = transform * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) - center_;
+	glm::vec3 dy = transform * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) - center_;
+	glm::vec3 dz = transform * glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) - center_;
+
+	// Vertices
+	glm::vec3 center = glm::vec3(center_);
+	glm::vec3 v1 = center + dx/2.0f + dy/2.0f + dz/2.0f;
+	glm::vec3 v2 = center + dx/2.0f + dy/2.0f - dz/2.0f;
+	glm::vec3 v3 = center + dx/2.0f - dy/2.0f - dz/2.0f;
+	glm::vec3 v4 = center + dx/2.0f - dy/2.0f + dz/2.0f;
+	glm::vec3 v5 = center - dx/2.0f + dy/2.0f + dz/2.0f;
+	glm::vec3 v6 = center - dx/2.0f + dy/2.0f - dz/2.0f;
+	glm::vec3 v7 = center - dx/2.0f - dy/2.0f - dz/2.0f;
+	glm::vec3 v8 = center - dx/2.0f - dy/2.0f + dz/2.0f;
+
+	// Push vertices
+	box.vertices = {
+		Vertex {v1}, Vertex {v2}, Vertex {v3}, Vertex {v4},
+		Vertex {v5}, Vertex {v6}, Vertex {v7}, Vertex {v8}
+	};
+
+	// Indices
+	box.triangles = std::vector <Triangle> {
+		Triangle {0, 1, 2, Shades::ePillar}, Triangle {0, 2, 3, Shades::ePillar},
+		Triangle {4, 5, 6, Shades::ePillar}, Triangle {4, 6, 7, Shades::ePillar},
+		Triangle {0, 1, 5, Shades::ePillar}, Triangle {0, 5, 4, Shades::ePillar},
+		Triangle {1, 2, 6, Shades::ePillar}, Triangle {1, 6, 5, Shades::ePillar},
+		Triangle {2, 3, 7, Shades::ePillar}, Triangle {2, 7, 6, Shades::ePillar},
+		Triangle {3, 0, 4, Shades::ePillar}, Triangle {3, 4, 7, Shades::ePillar}
+	};
+
+	return box;
+}
+
+// Generate terrain tile mesh
+// TODO: try to optimizde the resulting mesh (low deltas could be merged)
+inline Mesh generate_terrain(int resolution)
+{
+	float width = 10.0f;
+	float height = 10.0f;
+
+	// Height map
+	size_t mapres = resolution + 1;
+	std::vector <float> height_map(mapres * mapres);
+
+	srand(clock());
+	for (size_t i = 0; i < mapres * mapres; i++)
+		height_map[i] = randf() * 1.0f;
+
+	float slice = width/resolution;
+
+	float x = -width/2.0f;
+	float z = -height/2.0f;
+
+	Mesh tile;
+	for (int i = 0; i <= resolution; i++) {
+		for (int j = 0; j <= resolution; j++) {
+			Vertex vertex;
+			vertex.position = glm::vec3(x, height_map[i * resolution + j], z);
+			tile.vertices.push_back(vertex);
+			x += slice;
+		}
+
+		x = -width/2.0f;
+		z += slice;
+	}
+
+	// Generate indices
+	for (int i = 0; i < resolution; i++) {
+		for (int j = 0; j < resolution; j++) {
+			// Indices of square
+			uint32_t a = i * (resolution + 1) + j;
+			uint32_t b = (i + 1) * (resolution + 1) + j;
+			uint32_t c = (i + 1) * (resolution + 1) + j + 1;
+			uint32_t d = i * (resolution + 1) + j + 1;
+
+			// Push
+			tile.triangles.push_back(Triangle {a, b, c, Shades::eGrass});
+			tile.triangles.push_back(Triangle {a, c, d, Shades::eGrass});
+		}
+	}
+
+	return tile;
+}
+
+// Generate a scene tile
+inline Mesh generate_tile(int resolution)
+{
+	// Generate terrain tile
+	// TODO: pass height map
+	// Mesh tile = generate_terrain(resolution);
+	Mesh tile;
+
+	// Add random columns
+	int nboxes = rand() % 5 + 5;
+
+	for (int i = 0; i < nboxes; i++) {
+		// Random size
+		float width = randf() * 0.6f + 0.5f;
+		float depth = randf() * 0.6f + 0.5f;
+		float height = randf() * 2.0f + 0.5f;
+
+		// Random position within the tile
+		float x = randf(-4.5, 4.5);
+		float z = randf(-4.5, 4.5);
+		float y = height / 2.0f + randf();
+
+		// Random rotation
+		float rx = randf() * 15.0f;
+		float ry = randf() * 360.0f;
+		float rz = randf() * 15.0f;
+
+		// Generate box
+		glm::mat4 mat = Transform {
+			glm::vec3(x, y, z),
+			glm::vec3(rx, ry, rz),
+			glm::vec3(width, height, depth)
+		}.matrix();
+
+		// Add box
+		tile.add(generate_pillar(mat));
+	}
+
+	return tile;
+}
+
+// State for the application
+struct State {
+	bool show_clouds = true;
+	bool show_normals = false;
+	bool show_triangles = true;
+	bool tab = false;
+	bool viewing_mode = false;
+
+	// TODO: method to apply settings if changed
+};
+
+extern State state;
 
 #endif
