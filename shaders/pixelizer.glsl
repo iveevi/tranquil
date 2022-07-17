@@ -11,7 +11,7 @@
 
 void main()
 {
-	ivec2 coord = pixel * ivec2(gl_GlobalInvocationID.xy);
+	ivec2 coord = pixel * ivec2(gl_GlobalInvocationID.xy) + ivec2(offx, offy);
 
 	vec2 uv = vec2(coord) + vec2(pixel/2.0f);
 	uv /= vec2(width, height);
@@ -20,10 +20,11 @@ void main()
 
 	// Base color gets brighter as ray and light dir
 	float k = pow(max(dot(r.d, light_dir), 0), 8) * 0.5 + 0.5;
-	vec4 color = vec4(k, k, 0.7, 1.0);
+	// vec4 color = vec4(k, k, 0.7, 1.0);
+	vec4 color = vec4(0.5, 0.5, 0.7, 1.0);
 
 	// Intersection it = intersect_heightmap(r);
-	Intersection it = trace(r);
+	Intersection it = trace(r, false);
 
 	if (normals == 1) {
 		color = vec4(0, 0, 0, 1.0);

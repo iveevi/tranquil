@@ -10,15 +10,10 @@ float vec_max(vec3 v)
 	return max(max(v.x, v.y), v.z);
 }
 
-float quantize(float v, float b)
-{
-	return floor(v * b) / b;
-}
-
 vec4 shade(Intersection it)
 {
 	vec3 Kd = it.Kd;
-	if (grass_length == 1 || grass_power == 1)
+	if (grass_length == 1 || grass_power == 1 || grass_density == 1)
 		return vec4(Kd, 1.0);
 
 	// Directional light
@@ -35,7 +30,7 @@ vec4 shade(Intersection it)
 	// Check if light is visible
 	Ray shadow_ray = Ray(it.p + it.n * ray_shadow_step, light_dir);
 
-	Intersection shadow_it = shadow_trace(shadow_ray);
+	Intersection shadow_it = trace(shadow_ray, true);
 
 	vec3 ds = diffuse;
 
@@ -53,9 +48,22 @@ vec4 shade(Intersection it)
 	if (shadow_it.id == -1)
 		color += light_intensity * ds * kcloud;
 	else {
-		color += 0.1f * ds * kcloud;
+		vec3 k = 0.1f * light_intensity;
+
+		// If the shadow hit was grass, then add little bit back
+		if (shadow_it.shading == eGrass) {
+			// TODO: also do a second shadow test, since self
+			// shadowing is smol
+			k *= 7.0f;
+		}
+
+		color += k * ds * kcloud;
 		// color = vec3(1, 0, 1);
 	}
+
+	// If grass, quantize the color
+	/* if (it.shading == eGrass) {
+	} */
 
 	return vec4(color, 1);
 }

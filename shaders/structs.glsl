@@ -82,6 +82,96 @@ float _intersect_time(Ray r, Quad q)
 	return min(t1, t2);
 }
 
+// Quadratic bezier
+struct QuadraticBezier {
+	vec3 v1;
+	vec3 v2;
+	vec3 v3;
+};
+
+vec3 eval(QuadraticBezier q, float t)
+{
+	return (1.0 - t) * (1.0 - t) * q.v1 + 2.0 * t * (1.0 - t) * q.v2 + t * t * q.v3;
+}
+
+const float thickness = 0.02;
+
+#define PI 3.14159265358979
+#define HALFPI 1.57079632679
+
+//Find roots using Cardano's method. http://en.wikipedia.org/wiki/Cubic_function#Cardano.27s_method
+vec2 solveCubic2(float a, float b, float c)
+{
+	float p = b-a*a/3., p3 = p*p*p;
+	float q = a*(2.*a*a-9.*b)/27.+ c;
+	float d = q*q+4.*p3/27.;
+	float offset = -a / 3.;
+	if(d>0.)
+	{ 
+		float z = sqrt(d);
+		vec2 x = (vec2(z,-z)-q)*0.5;
+		vec2 uv = sign(x)*pow(abs(x), vec2(1./3.));
+		return vec2(offset + uv.x + uv.y);
+	}
+	float v = acos(-sqrt(-27./p3)*q/2.)/3.;
+	float m = cos(v), n = sin(v)*1.732050808;
+	return vec2(m + m, -n - m) * sqrt(-p / 3.0) + offset;
+}
+
+// How to resolve the equation below can be seen on this image.
+// http://www.perbloksgaard.dk/research/DistanceToQuadraticBezier.jpg
+vec3 intersectQuadraticBezier(vec3 p0, vec3 p1, vec3 p2) 
+{
+	vec2 A2 = p1.xy - p0.xy;
+	vec2 B2 = p2.xy - p1.xy - A2;
+	vec3 r = vec3(-3.*dot(A2,B2), dot(-p0.xy,B2)-2.*dot(A2,A2), dot(-p0.xy,A2)) / -dot(B2,B2);
+	vec2 t = clamp(solveCubic2(r.x, r.y, r.z), 0., 1.);
+	vec3 A3 = p1 - p0;
+	vec3 B3 = p2 - p1 - A3;
+	vec3 D3 = A3 * 2.;
+	vec3 pos1 = (D3+B3*t.x)*t.x+p0;
+	vec3 pos2 = (D3+B3*t.y)*t.y+p0;
+	
+	pos1.xy /= (thickness * max(1 - t.x, 0.2));
+	pos2.xy /= (thickness * max(1 - t.y, 0.2));
+
+	float pos1Len = length(pos1.xy);
+	if (pos1Len > 1.0f)
+		pos1 = vec3(1e8);
+
+	float pos2Len = length(pos2.xy);
+	if (pos2Len > 1.0f)
+		pos2 = vec3(1e8);
+
+	pos1.z -= cos(pos1Len*HALFPI)*thickness;
+	pos2.z -= cos(pos2Len*HALFPI)*thickness;
+	return (length(pos1) < length(pos2)) ? vec3(pos1Len,pos1.z,t.x) : vec3(pos2Len,pos2.z,t.y);
+}
+
+mat3 inverseView(vec2 a)
+{
+	vec2 c = cos(a);
+	vec2 s = sin(a);
+	return mat3(c.y,0.,-s.y,s.x*s.y,c.x,s.x*c.y,c.x*s.y,-s.x,c.x*c.y);
+}
+
+// Ray-quadratic bezier intersection
+float _intersect_time(Ray r, QuadraticBezier qb)
+{
+	// Transform points so that ray is the +x-axis
+	mat3 m = inverseView(vec2(asin(-r.d.y), atan(r.d.x, r.d.z)));
+
+	vec3 v1 = (qb.v1 - r.p) * m;
+	vec3 v2 = (qb.v2 - r.p) * m;
+	vec3 v3 = (qb.v3 - r.p) * m;
+
+	vec3 t = intersectQuadraticBezier(v1, v2, v3);
+	if (t.y < 0.0 || t.y > 1e4)
+		return -1.0;
+
+	return t.y;
+}
+
 struct Intersection {
 	float t;
 	vec3 p;

@@ -2,6 +2,7 @@
 layout (local_size_x = 1, local_size_y = 1) in;
 
 layout (rgba32f, binding = 0) uniform image2D image;
+layout (r8, binding = 8) uniform image2D segments;
 
 layout (std430, binding = 1) buffer Vertices {
 	vec4 data[];
@@ -24,19 +25,25 @@ layout (binding = 5) uniform sampler2D s_grassmap_normal;
 layout (binding = 6) uniform sampler2D s_grass_length;
 layout (binding = 7) uniform sampler2D s_grass_power;
 
+uniform int width;
+uniform int height;
+uniform int pixel;
+uniform int offx;
+uniform int offy;
+
 uniform float ray_marching_step;
 uniform float ray_shadow_step;
 uniform float terrain_size;
 
 uniform int clouds;
-uniform int height;
 uniform int grass;
+uniform int grass_density;
 uniform int grass_length;
 uniform int grass_power;
 uniform int normals;
-uniform int pixel;
 uniform int primitives;
-uniform int width;
+
+uniform vec2 wind_offset;
 
 uniform vec3 light_dir;
 

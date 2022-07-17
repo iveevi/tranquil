@@ -388,11 +388,13 @@ int main()
 	set_int(shaders.pixelizer, "clouds", state.show_clouds);
 	set_int(shaders.pixelizer, "normals", state.show_normals);
 	set_int(shaders.pixelizer, "grass", state.show_grass);
-	set_int(shaders.pixelizer, "grass_lenght", state.show_grass_length);
+	set_int(shaders.pixelizer, "grass_density", state.show_grass_map);
+	set_int(shaders.pixelizer, "grass_length", state.show_grass_length);
 	set_int(shaders.pixelizer, "grass_power", state.show_grass_power);
 	set_float(shaders.pixelizer, "ray_marching_step", state.ray_marching_step);
 	set_float(shaders.pixelizer, "ray_shadow_step", state.ray_shadow_step);
 	set_float(shaders.pixelizer, "terrain_size", state.terrain_size);
+	set_vec2(shaders.pixelizer, "wind_offset", {0, 0});
 
 	camera = Camera {origin, lookat, up};
 	camera.send_to_shader(shaders.pixelizer);
@@ -462,6 +464,13 @@ int main()
 	float cloud_time = 0;
 	float sun_time = 0;
 
+	const int BATCH_SIZE = 1000;
+
+	int offx = 0;
+	int offy = 0;
+
+	glm::vec2 wind_velocity {0, 0};
+
 	while (!glfwWindowShouldClose(window)) {
 		// Close if escape or q
 		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
@@ -524,6 +533,17 @@ int main()
 			// Update texture
 			glBindTexture(GL_TEXTURE_2D, cloud_density);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cloud_resolution, cloud_resolution, 0, GL_RED, GL_UNSIGNED_BYTE, cloud_density_image);
+		
+			// Random wind offset
+			float angle = randf(-glm::pi <float> (), glm::pi <float> ());
+			float strength = 0.01f;
+
+			glm::vec2 wind_acceleration = strength * glm::vec2 {glm::cos(angle), glm::sin(angle)};
+			wind_velocity += wind_acceleration * 0.2f;
+			wind_velocity = glm::clamp(wind_velocity, -1.0f, 1.0f);
+
+			// Update wind offset
+			set_vec2(shaders.pixelizer, "wind_offset", wind_velocity);
 		}
 
 		/* Update sun direction, should lie on the x = z plane
@@ -536,6 +556,10 @@ int main()
 
 		// Ray tracing
 		{
+			// Set offsets
+			set_int(shaders.pixelizer, "offx", offx);
+			set_int(shaders.pixelizer, "offy", offy);
+
 			// Bind shaders.pixelizer and dispatch
 			glUseProgram(shaders.pixelizer);
 
@@ -560,7 +584,17 @@ int main()
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, ssbo_bvh);
 
-			glDispatchCompute(WIDTH/PIXEL_SIZE, HEIGHT/PIXEL_SIZE, 1);
+			glDispatchCompute(BATCH_SIZE/PIXEL_SIZE, BATCH_SIZE/PIXEL_SIZE, 1);
+
+			// Update offsets
+			offx += BATCH_SIZE;
+			if (offx > WIDTH) {
+				offx = 0;
+				offy += BATCH_SIZE;
+			}
+
+			if (offy > HEIGHT)
+				offy = 0;
 		}
 
 		// Wait
@@ -591,11 +625,20 @@ int main()
 				ImGui::Checkbox("Show clouds", &state.show_clouds);
 				ImGui::Checkbox("Show grass", &state.show_grass);
 
-				if (ImGui::Checkbox("Show grass length", &state.show_grass_length))
-					state.show_grass_power = false;
-
-				if (ImGui::Checkbox("Show grass power", &state.show_grass_power))
+				if (ImGui::Checkbox("Show grass map", &state.show_grass_map)) {
 					state.show_grass_length = false;
+					state.show_grass_power = false;
+				}
+
+				if (ImGui::Checkbox("Show grass length", &state.show_grass_length)) {
+					state.show_grass_map = false;
+					state.show_grass_power = false;
+				}
+
+				if (ImGui::Checkbox("Show grass power", &state.show_grass_power)) {
+					state.show_grass_map = false;
+					state.show_grass_length = false;
+				}
 
 				ImGui::Checkbox("Show normals", &state.show_normals);
 				ImGui::SliderFloat("Ray marching step", &state.ray_marching_step, 1e-3f, 1.0f, "%.3g", 1 << 5);
@@ -622,6 +665,7 @@ int main()
 		set_int(shaders.pixelizer, "clouds", state.show_clouds);
 		set_int(shaders.pixelizer, "normals", state.show_normals);
 		set_int(shaders.pixelizer, "grass", state.show_grass);
+		set_int(shaders.pixelizer, "grass_density", state.show_grass_map);
 		set_int(shaders.pixelizer, "grass_length", state.show_grass_length);
 		set_int(shaders.pixelizer, "grass_power", state.show_grass_power);
 		set_float(shaders.pixelizer, "ray_marching_step", state.ray_marching_step);

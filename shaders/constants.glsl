@@ -3,6 +3,7 @@ uint eNone = 0;
 uint eWater = 1;
 uint eGrass = 2;
 uint ePillar = 3;
+uint eGrassBlade = 4;
 
 // Constants
 const float PI = 3.14159265358979323846f;

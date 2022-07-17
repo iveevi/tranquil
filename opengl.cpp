@@ -18,7 +18,7 @@ int compile_shader(const char *path, unsigned int type)
 
 	if (!source) {
 		printf("Failed to read shader source\n");
-		return 0;
+		throw std::runtime_error("Failed to read shader source");
 	}
 
 	unsigned int shader = glCreateShader(type);
@@ -34,7 +34,7 @@ int compile_shader(const char *path, unsigned int type)
 	if (!success) {
 		glGetShaderInfoLog(shader, 512, NULL, info_log);
 		printf("Failed to compile shader (%s):\n%s\n", path, info_log);
-		return 0;
+		throw std::runtime_error("Failed to compile shader");
 	}
 
 	printf("Successfully compiled shader %s\n", path);
@@ -72,6 +72,13 @@ void set_float(unsigned int program, const char *name, float value)
 	glUseProgram(program);
 	int i = glGetUniformLocation(program, name);
 	glUniform1f(i, value);
+}
+
+void set_vec2(unsigned int program, const char *name, const glm::vec2 &vec)
+{
+	glUseProgram(program);
+	int i = glGetUniformLocation(program, name);
+	glUniform2fv(i, 1, glm::value_ptr(vec));
 }
 
 void set_vec3(unsigned int program, const char *name, const glm::vec3 &vec)

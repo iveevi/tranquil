@@ -18,6 +18,7 @@ builds:
       thirdparty/imgui,
       thirdparty/imgui/backends'
     - libraries: 'glfw'
+    - flags: '-std=c++17 -O3'
   - main_gdb:
     - sources: 'main.cpp,
       opengl.cpp,

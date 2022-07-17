@@ -30,8 +30,8 @@
 #include "core.hpp"
 #include "shades.hpp"
 
-const int WIDTH = 800;
-const int HEIGHT = 600;
+const int WIDTH = 500;
+const int HEIGHT = 500;
 const int PIXEL_SIZE = 4;
 
 inline float randf()
@@ -96,6 +96,7 @@ int compile_shader(const char *, unsigned int);
 int link_program(unsigned int);
 void set_int(unsigned int, const char *, int);
 void set_float(unsigned int, const char *, float);
+void set_vec2(unsigned int, const char *, const glm::vec2 &);
 void set_vec3(unsigned int, const char *, const glm::vec3 &);
 
 // Camera stuff
@@ -399,15 +400,16 @@ inline Mesh generate_tile(int resolution)
 // State for the application
 struct State {
 	bool show_clouds = true;
+	bool show_grass = true;
+	bool show_grass_map = false;
+	bool show_grass_length = false;
+	bool show_grass_power = false;
 	bool show_normals = false;
 	bool show_triangles = false;
 	bool tab = false;
 	bool viewing_mode = true;
-	float ray_marching_step = 0.01f;
+	float ray_marching_step = 0.1f;
 	float ray_shadow_step = 0.001f;
-	bool show_grass = true;
-	bool show_grass_length = false;
-	bool show_grass_power = false;
 	const float terrain_size = 20.0f;
 
 	// TODO: method to apply settings if changed
