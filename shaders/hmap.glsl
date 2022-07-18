@@ -30,7 +30,7 @@ float hmap(float x, float z)
 
 	float h = scale * texture(s_heightmap, uv1).r;
 	if (grass == 1) {
-		vec2 uv2 = terrain_uv(vec2(x, z) + wind_offset);
+		vec2 uv2 = terrain_uv(vec2(x, z) + wind_offset/5.0f);
 		float g = texture(s_grassmap, uv2).r;
 		float l = texture(s_grass_length, uv2).r;
 		float p = texture(s_grass_power, uv2).r;

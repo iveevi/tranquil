@@ -20,7 +20,7 @@ float zmin = -terrain_size * 0.5f;
 float zmax = terrain_size * 0.5f;
 
 // Height scaling
-float scale = 2.0f;
+float scale = 3.0f;
 
 // Shading
 const vec3 light_intensity = 2 * vec3(1, 1, 0.6);

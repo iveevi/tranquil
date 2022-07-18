@@ -18,13 +18,19 @@ layout (std430, binding = 3) buffer BVH {
 
 layout (binding = 0) uniform sampler2D s_heightmap;
 layout (binding = 1) uniform sampler2D s_heightmap_normal;
+
 layout (binding = 2) uniform sampler2D s_clouds;
+
 layout (binding = 3) uniform sampler2D s_grass;
+
 layout (binding = 4) uniform sampler2D s_grassmap;
 layout (binding = 5) uniform sampler2D s_grassmap_normal;
 layout (binding = 6) uniform sampler2D s_grass_length;
 layout (binding = 7) uniform sampler2D s_grass_power;
+
 layout (binding = 8) uniform sampler2D s_water_level;
+layout (binding = 9) uniform sampler2D s_water_normal1;
+layout (binding = 10) uniform sampler2D s_water_normal2;
 
 uniform int width;
 uniform int height;
@@ -46,6 +52,7 @@ uniform int normals;
 uniform int primitives;
 
 uniform vec2 wind_offset;
+uniform vec2 water_offset;
 
 uniform vec3 light_dir;
 

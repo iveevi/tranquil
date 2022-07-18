@@ -27,6 +27,10 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
+// STB image headers
+#include <stb/stb_image.h>
+#include <stb/stb_image_write.h>
+
 // Perlin noise
 #include <PerlinNoise.hpp>
 
@@ -542,7 +546,7 @@ class HeightMap {
 	}
 
 	// Evaluate the heightmap at a given point
-	float eval(float x, float z) {
+	static float eval(float *data, int data_res, float x, float z) {
 		// x and z are in the range +/- terrain_size
 
 		// Scale to [0, resolution]
@@ -589,16 +593,16 @@ class HeightMap {
 
 				glm::vec3 grad_x {2 * d, 0, 0};
 				if (x > 0 && x < normals_res - 1) {
-					float y1 = eval(x_ + eps, z_);
-					float y2 = eval(x_ - eps, z_);
+					float y1 = eval(data, data_res, x_ + eps, z_);
+					float y2 = eval(data, data_res, x_ - eps, z_);
 
 					grad_x.y = (y1 - y2) / (2 * eps);
 				}
 
 				glm::vec3 grad_z {0, 0, 2 * d};
 				if (y > 0 && y < normals_res - 1) {
-					float y1 = eval(x_, z_ + eps);
-					float y2 = eval(x_, z_ - eps);
+					float y1 = eval(data, data_res, x_, z_ + eps);
+					float y2 = eval(data, data_res, x_, z_ - eps);
 
 					grad_z.y = (y1 - y2) / (2 * eps);
 				}
@@ -616,14 +620,33 @@ class HeightMap {
 
 	// Water level heightmap
 	float *water_level_data;
+	glm::vec3 *water_level_normals;
 	int water_res;
 
-	void generate_water_level_map() {
+	/* void generate_water_level_map() {
 		// Flat water level
 		float water_level = 1.2f;
 		for (int i = 0; i < water_res * water_res; i++)
 			water_level_data[i] = water_level;
-	}
+
+		// Random normals
+		srand(clock());
+		uint32_t seed = rand();
+		const siv::PerlinNoise p_normals {seed};
+
+		float frequency = 256.0f;
+		const double f = (frequency/water_res);
+
+		for (int x = 0; x < water_res; x++) {
+			for (int y = 0; y < water_res; y++) {
+				float h = p_normals.octave2D_01(x * f, y * f, 64);
+
+				// Normals should mostly be facing up
+				glm::vec3 n {0.25f, h, 0.25f};
+				water_level_normals[x * water_res + y] = 0.5f * glm::normalize(n) + 0.5f;
+			}
+		}
+	} */
 
 	// TODO: keep outside, since its duplicate with grassmap
 	static unsigned int make_texture(uint8_t *data, int res) {
@@ -643,6 +666,8 @@ public:
 	unsigned int	t_normal;
 
 	unsigned int	t_water_level;
+	unsigned int	t_water_normal1;
+	unsigned int	t_water_normal2;
 
 	// Constructor
 	HeightMap(int resolution, float frequency, int octaves)
@@ -652,12 +677,14 @@ public:
 		// Allocate memory for heightmap
 		data = new float[data_res * data_res];
 		normals = new glm::vec3[normals_res * normals_res];
+
 		water_level_data = new float[water_res * water_res];
+		water_level_normals = new glm::vec3[water_res * water_res];
 
 		// Generate heightmap and normals
 		generate_heightmap(frequency, octaves);
 		generate_normals();
-		generate_water_level_map();
+		// generate_water_level_map();
 
 		// Convert to byte array
 		uint8_t *image = new uint8_t[resolution * resolution];
@@ -692,7 +719,52 @@ public:
 		glBindImageTexture(6, t_normal, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
 
 		// Create water level texture
-		t_water_level = make_texture(water_image, water_res);
+		// t_water_level = make_texture(water_image, water_res);
+
+		// Load water normal texture
+		int width, height;
+		
+		unsigned char *water_n1 = stbi_load(
+			"./water_normal1.jpg",
+			&width, &height,
+			nullptr, STBI_rgb_alpha
+		);
+
+		if (!water_n1) {
+			std::cout << "Failed to load water normal 1" << std::endl;
+			exit(1);
+		}
+
+		// Create water level normal texture
+		glGenTextures(1, &t_water_normal1);
+		glBindTexture(GL_TEXTURE_2D, t_water_normal1);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, water_n1);
+		glBindImageTexture(7, t_water_normal1, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
+
+		unsigned char *water_n2 = stbi_load(
+			"./water_normal2.jpeg",
+			&width, &height,
+			nullptr, STBI_rgb_alpha
+		);
+
+		if (!water_n2) {
+			std::cout << "Failed to load water normal 2" << std::endl;
+			exit(1);
+		}
+
+		// Create water level normal texture
+		glGenTextures(1, &t_water_normal2);
+		glBindTexture(GL_TEXTURE_2D, t_water_normal2);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, water_n2);
+		glBindImageTexture(8, t_water_normal2, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
 
 		// TODO: constexpr binding points
 

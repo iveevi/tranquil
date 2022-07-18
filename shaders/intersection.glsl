@@ -211,7 +211,7 @@ Intersection intersect_grass_blades(Ray ray)
 Intersection intersect_water(Ray r)
 {
 	// Create quad for water
-	float y = 1.2f;
+	float y = 1.5f;
 	Quad q = Quad(
 		vec3(xmin, y, zmin),
 		vec3(xmin, y, zmax),
@@ -229,7 +229,24 @@ Intersection intersect_water(Ray r)
 	it.shading = eWater;
 	it.t = t;
 	it.Kd = vec3(0.7, 0.7, 1.0);
-	it.n = vec3(0, 1, 0);
+
+	// TODO: procedurally generate wave normals, since textures have clear
+	// cutoffs
+	vec2 pos1 = vec2(it.p.x, it.p.z) + water_offset;
+	vec2 pos2 = vec2(it.p.x, it.p.z) + vec2(0.765 * water_offset.y, -0.4343 * water_offset.x);
+
+	pos1 = mod(pos1 + terrain_size/2, terrain_size) - terrain_size/2;
+	pos2 = mod(pos2 + terrain_size/2, terrain_size) - terrain_size/2;
+
+	vec2 uv1 = terrain_uv(pos1);
+	vec2 uv2 = terrain_uv(pos2);
+
+	vec3 n1 = 2 * texture(s_water_normal1, uv1).xyz - 1;
+	vec3 n2 = 2 * texture(s_water_normal2, uv2).xyz - 1;
+
+	// Current normal is faced +z, reorient to face +y
+	it.n = normalize(n1 + n2);
+	it.n = normalize(vec3(it.n.x, it.n.z, -it.n.y));
 
 	return it;
 }

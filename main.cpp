@@ -1,9 +1,7 @@
-#include "common.hpp"
-
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb/stb_image.h>
-#include <stb/stb_image_write.h>
+
+#include "common.hpp"
 
 // Global variables
 Camera camera;
@@ -94,6 +92,7 @@ int main()
 	set_int(shaders->pixelizer, "pixel", PIXEL_SIZE);
 	set_float(shaders->pixelizer, "terrain_size", state.terrain_size);
 	set_vec2(shaders->pixelizer, "wind_offset", {0, 0});
+	set_vec2(shaders->pixelizer, "water_offset", {0, 0});
 	state.apply();
 
 	camera = Camera {origin, lookat, up};
@@ -171,6 +170,7 @@ int main()
 	int offy = 0;
 
 	glm::vec2 wind_velocity {0, 0};
+	glm::vec2 water_offset {0, 0};
 	while (!glfwWindowShouldClose(window)) {
 		// Close if escape or q
 		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
@@ -246,15 +246,20 @@ int main()
 
 			// Update wind offset
 			set_vec2(shaders->pixelizer, "wind_offset", wind_velocity);
+
+			// Update water offset
+			water_offset += 0.5f * glm::normalize(glm::vec2 {randf(), randf()}) * dt;
+
+			set_vec2(shaders->pixelizer, "water_offset", water_offset);
 		}
 
-		/* Update sun direction, should lie on the x = z plane
+		// Update sun direction, should lie on the x = z plane
 		float st = sun_time;
 		float y = glm::sin(st);
 		float x = glm::cos(st);
 
 		set_vec3(shaders->pixelizer, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
-		sun_time = std::fmod(sun_time + t/1000.0f, 2 * glm::pi <float>()); */
+		sun_time = std::fmod(sun_time + dt/25.0f, 2 * glm::pi <float> ());
 
 		// Ray tracing
 		{
@@ -269,8 +274,10 @@ int main()
 			glBindTexture(GL_TEXTURE_2D, heightmap.t_height);
 			glActiveTexture(GL_TEXTURE1);
 			glBindTexture(GL_TEXTURE_2D, heightmap.t_normal);
+
 			glActiveTexture(GL_TEXTURE2);
 			glBindTexture(GL_TEXTURE_2D, cloud_density);
+
 			glActiveTexture(GL_TEXTURE4);
 			glBindTexture(GL_TEXTURE_2D, grassmap.t_grass);
 			glActiveTexture(GL_TEXTURE5);
@@ -279,8 +286,14 @@ int main()
 			glBindTexture(GL_TEXTURE_2D, grassmap.t_length);
 			glActiveTexture(GL_TEXTURE7);
 			glBindTexture(GL_TEXTURE_2D, grassmap.t_power);
+
 			glActiveTexture(GL_TEXTURE8);
 			glBindTexture(GL_TEXTURE_2D, heightmap.t_water_level);
+
+			glActiveTexture(GL_TEXTURE9);
+			glBindTexture(GL_TEXTURE_2D, heightmap.t_water_normal1);
+			glActiveTexture(GL_TEXTURE10);
+			glBindTexture(GL_TEXTURE_2D, heightmap.t_water_normal2);
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vertices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
@@ -309,6 +322,7 @@ int main()
 
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, texture);
+			// glBindTexture(GL_TEXTURE_2D, heightmap.t_water_normal);
 
 			glBindVertexArray(vao);
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
