@@ -2,7 +2,7 @@
 layout (local_size_x = 1, local_size_y = 1) in;
 
 layout (rgba32f, binding = 0) uniform image2D image;
-layout (r8, binding = 8) uniform image2D segments;
+// layout (r8, binding = 8) uniform image2D segments;
 
 layout (std430, binding = 1) buffer Vertices {
 	vec4 data[];
@@ -37,6 +37,7 @@ uniform float terrain_size;
 
 uniform int clouds;
 uniform int grass;
+uniform int grass_blades;
 uniform int grass_density;
 uniform int grass_length;
 uniform int grass_power;

@@ -10,11 +10,13 @@ float vec_max(vec3 v)
 	return max(max(v.x, v.y), v.z);
 }
 
-vec4 shade(Intersection it)
+vec3 shade(Intersection it)
 {
 	vec3 Kd = it.Kd;
+
+	// TODO: helper function
 	if (grass_length == 1 || grass_power == 1 || grass_density == 1)
-		return vec4(Kd, 1.0);
+		return Kd;
 
 	// Directional light
 	vec3 light = light_dir;
@@ -45,6 +47,12 @@ vec4 shade(Intersection it)
 	if (clouds == 1)
 		kcloud = max((1 - cloud_density), 0.1);
 
+	if (it.shading == eWater) {
+		vec3 c = light_intensity * Kd * kcloud;
+		if (shadow_it.id != -1)
+			c *= 0.1f;
+	}
+
 	if (shadow_it.id == -1)
 		color += light_intensity * ds * kcloud;
 	else {
@@ -61,9 +69,37 @@ vec4 shade(Intersection it)
 		// color = vec3(1, 0, 1);
 	}
 
-	// If grass, quantize the color
-	/* if (it.shading == eGrass) {
-	} */
+	return color;
+}
 
-	return vec4(color, 1);
+vec4 shade(Intersection it, Ray r)
+{
+	// In case of water
+	if (it.shading == eWater) {
+		// Reflection ray
+		vec3 r = reflect(r.d, it.n);
+		Ray refl_ray = Ray(it.p + it.n * ray_shadow_step, r);
+
+		vec3 refl_color = vec3(0.5, 0.5, 0.5);
+
+		Intersection refl_it = trace(refl_ray, false);
+		if (refl_it.id != -1)
+			refl_color = shade(refl_it);
+
+		// Refraction ray
+		vec3 t = refract(r, it.n, 1.0f / 1.33f);
+		Ray refr_ray = Ray(it.p - it.n * ray_shadow_step, t);
+
+		vec3 refr_color = vec3(0.5, 0.5, 0.5);
+
+		Intersection refr_it = trace(refr_ray, false);
+		if (refr_it.id != -1)
+			refr_color = shade(refr_it);
+
+		// TODO: mix based on skim angle/fresnel
+		vec3 color = vec3(0.7, 0.7, 1) * mix(refl_color, refr_color, 0.5);
+		return vec4(color, 1.0f);
+	}
+
+	return vec4(shade(it), 1.0f);
 }

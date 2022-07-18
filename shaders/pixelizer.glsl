@@ -26,13 +26,14 @@ void main()
 	// Intersection it = intersect_heightmap(r);
 	Intersection it = trace(r, false);
 
+	// TODO: todo move all this to shade(ray) function
 	if (normals == 1) {
 		color = vec4(0, 0, 0, 1.0);
 		if (it.id != -1)
 			color.xyz = it.n * 0.5 + 0.5;
 	} else {
 		if (it.id != -1) {
-			color = shade(it);
+			color = shade(it, r);
 			// color.xyz = it.n * 0.5 + 0.5;
 		} else {
 			// Possibility of clouds (TODO: shade clouds)

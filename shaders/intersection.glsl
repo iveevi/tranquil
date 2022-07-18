@@ -1,5 +1,5 @@
 // Ray-triangle intersection
-Intersection _intersect(Ray r, Triangle tri, uint shading)
+Intersection _intersect(Ray r, Triangle tri)
 {
 	float t = _intersect_time(r, tri);
 	if (t < 0.0)
@@ -8,9 +8,9 @@ Intersection _intersect(Ray r, Triangle tri, uint shading)
 	vec3 e1 = tri.v2 - tri.v1;
 	vec3 e2 = tri.v3 - tri.v1;
 	vec3 n = -cross(e1, e2);
-	if (dot(n, r.d) > 0.0)
+	if (dot(n, vec3(1, 0, 0)) > 0.0)
 		n = -n;
-	return Intersection(t, p, normalize(n), 0, vec3(0), shading);
+	return Intersection(t, p, normalize(n), 0, vec3(0.5), ePillar);
 }
 
 Intersection intersect(Ray r, int i)
@@ -26,7 +26,7 @@ Intersection intersect(Ray r, int i)
 		vertices.data[c].xyz
 	);
 
-	return _intersect(r, t, tri.w);
+	return _intersect(r, t);
 }
 
 // Ray-quad intersection
@@ -90,22 +90,17 @@ float nrandf(vec3 f)
 	return 2 * randf(f) - 1;
 }
 
-// Whole scene intersection
-// TODO: bool porameter for shadowing or not
-Intersection trace(Ray ray, bool shadow)
+// Grass blades
+Intersection intersect_grass_blades(Ray ray)
 {
-	// "Min" intersection
 	Intersection mini = def_it();
 
-	// TODO: option for self-shadowing
-	if (!shadow)
-		mini = intersect_heightmap(ray);
-
 	// Grass (sprinkled evenly for now)
-	float dx = 2.0f;
-	float dz = 2.0f;
+	float dx = 1.0f;
+	float dz = 1.0f;
 
 	// TODO: different number per region
+	// TODO: 50 per 1x1 is a good density
 	int blades_per_region = 25;
 	int max_iterations = 2 * blades_per_region;
 
@@ -154,8 +149,12 @@ Intersection trace(Ray ray, bool shadow)
 				);
 
 				Intersection it = intersect(ray, qb);
-				if (it.id != -1 && it.t < mini.t)
-					mini = it;
+				if (it.id != -1) {
+					// If shadowing, then prioritize grass
+					// over heightmap (stronger shadow)
+					if (it.t < mini.t)
+						mini = it;
+				}
 
 				/* xp = xp + randf(vec3(xp, zp, 0.0f));
 				zp = zp + randf(vec3(xp, zp, 0.0f)); */
@@ -175,19 +174,67 @@ Intersection trace(Ray ray, bool shadow)
 		}
 	}
 
-	/* Quads beziers
-	QuadraticBezier qb = QuadraticBezier(
-		vec3(0, 0, 0),
-		vec3(3, 4, 0),
-		vec3(5, 5, 0)
+	return mini;
+}
+
+// Water
+Intersection intersect_water(Ray r)
+{
+	// Create quad for water
+	float y = 1.2f;
+	Quad q = Quad(
+		vec3(xmin, y, zmin),
+		vec3(xmin, y, zmax),
+		vec3(xmax, y, zmax),
+		vec3(xmax, y, zmin)
 	);
 
-	Intersection qi = intersect(ray, qb);
-	// return qi;
+	float t = _intersect_time(r, q);
+	if (t < 0.0)
+		return def_it();
 
-	// TODO: min function
-	if (qi.id != -1 && qi.t < mini.t)
-		mini = qi; */
+	Intersection it;
+	it.id = primitives + 1;
+	it.p = r.p + r.d * t;
+	it.shading = eWater;
+	it.t = t;
+	it.Kd = vec3(0.7, 0.7, 1.0);
+	it.n = vec3(0, 1, 0);
+
+	return it;
+}
+
+// Whole scene intersection
+// TODO: bool porameter for shadowing or not
+Intersection trace(Ray ray, bool shadow)
+{
+	// "Min" intersection
+	// TODO: configs for self shadowing?
+	Intersection mini = intersect_heightmap(ray);
+
+	bool heightmap = true;
+
+	// Grass
+	if (grass_blades == 1) {
+		Intersection it = intersect_grass_blades(ray);
+		if (it.id != -1) {
+			if ((it.t < mini.t) || (shadow && heightmap)) {
+				mini = it;
+				heightmap = false;
+			}
+		}
+	}
+
+	// Water
+	Intersection it = intersect_water(ray);
+	if (it.id != -1) {
+		// Allow light to leak through water
+		// TODO: apply two traces in this case
+		if ((it.t < mini.t) && !shadow) {
+			mini = it;
+			heightmap = false;
+		}
+	}
 
 	if (primitives == 0)
 		return mini;
