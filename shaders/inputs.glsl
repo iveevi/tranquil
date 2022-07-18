@@ -32,6 +32,8 @@ layout (binding = 8) uniform sampler2D s_water_level;
 layout (binding = 9) uniform sampler2D s_water_normal1;
 layout (binding = 10) uniform sampler2D s_water_normal2;
 
+layout (binding = 11) uniform sampler2D s_wind;
+
 uniform int width;
 uniform int height;
 uniform int pixel;
@@ -51,7 +53,9 @@ uniform int grass_power;
 uniform int normals;
 uniform int primitives;
 
-uniform vec2 wind_offset;
+uniform int wind_map;
+
+// uniform vec2 wind_offset;
 uniform vec2 water_offset;
 
 uniform vec3 light_dir;

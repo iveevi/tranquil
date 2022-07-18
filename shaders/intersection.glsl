@@ -104,6 +104,11 @@ vec3 rand3f(vec3 f)
 	return uintBitsToFloat((pcg3d(floatBitsToUint(f)) & 0x007FFFFFu) | 0x3F800000u) - 1.0;
 }
 
+vec3 nrand3f(vec3 f)
+{
+	return 2 * rand3f(f) - 1;
+}
+
 float randf(vec3 f)
 {
 	return rand3f(f).x;
@@ -125,13 +130,12 @@ Intersection intersect_grass_blades(Ray ray)
 
 	// TODO: different number per region
 	// TODO: 50 per 1x1 is a good density
-	int blades_per_region = 25;
+	int blades_per_region = 5;
 	int max_iterations = 2 * blades_per_region;
 
 	// Wind affects blades more than grass mush
 	// TODO: function for this whole thing
 	// TODO: utilize a max mipmap level for grass
-	vec2 wo = wind_offset * 5.0f;
 	for (float x = xmin; x < xmax; x += dx) {
 		for (float z = zmin; z < zmax; z += dz) {
 			// TOOD: skip region is max grass density is too low
@@ -159,11 +163,19 @@ Intersection intersect_grass_blades(Ray ray)
 
 			while (i < blades_per_region && (true_count++) < max_iterations) {
 				float y = hmap(xp, zp);
+				vec3 n = hmap_normal(xp, zp);
+
 				vec2 uv = terrain_uv(vec2(xp, zp));
 
 				float l = texture(s_grass_length, uv).r;
 				if (l < 0.3)
 					continue;
+	
+				vec3 wind_offset = texture(s_wind, uv).xyz;
+				vec2 wo = vec2(wind_offset.x, wind_offset.y) *
+					wind_offset.z/5.0f;
+				wo += nrand3f(vec3(wind_offset)).xy * 0.05f;
+				wo = clamp(wo, -0.5f, 0.5f);
 
 				l *= 0.8f;
 				QuadraticBezier qb = QuadraticBezier(
@@ -211,7 +223,7 @@ Intersection intersect_grass_blades(Ray ray)
 Intersection intersect_water(Ray r)
 {
 	// Create quad for water
-	float y = 1.5f;
+	float y = water_level;
 	Quad q = Quad(
 		vec3(xmin, y, zmin),
 		vec3(xmin, y, zmax),

@@ -404,7 +404,7 @@ inline Mesh generate_tile(int resolution)
 	Mesh tile;
 
 	// Add random columns
-	int nboxes = rand() % 5 + 5;
+	int nboxes = rand() % 5 + 10;
 
 	for (int i = 0; i < nboxes; i++) {
 		// Random size
@@ -491,6 +491,7 @@ struct State {
 	bool show_grass_power = false;
 	bool show_normals = false;
 	bool show_triangles = true;
+	bool show_wind_map = false;
 	bool tab = false;
 	bool viewing_mode = true;
 
@@ -508,6 +509,7 @@ struct State {
 		set_int(shaders->pixelizer, "grass_density", show_grass_map);
 		set_int(shaders->pixelizer, "grass_length", show_grass_length);
 		set_int(shaders->pixelizer, "grass_power", show_grass_power);
+		set_int(shaders->pixelizer, "wind_map", show_wind_map);
 		set_float(shaders->pixelizer, "ray_marching_step", ray_marching_step);
 		set_float(shaders->pixelizer, "ray_shadow_step", ray_shadow_step);
 	}
@@ -521,6 +523,11 @@ inline float lerp(float a, float b, float t)
 }
 
 inline glm::vec2 lerp(glm::vec2 a, glm::vec2 b, float t)
+{
+	return a + (b - a) * t;
+}
+
+inline glm::vec3 lerp(glm::vec3 a, glm::vec3 b, float t)
 {
 	return a + (b - a) * t;
 }
@@ -546,7 +553,8 @@ class HeightMap {
 	}
 
 	// Evaluate the heightmap at a given point
-	static float eval(float *data, int data_res, float x, float z) {
+	template <class T>
+	static T eval(T *data, int data_res, float x, float z) {
 		// x and z are in the range +/- terrain_size
 
 		// Scale to [0, resolution]
@@ -565,15 +573,15 @@ class HeightMap {
 		float zf = z - z0;
 
 		// Get heights
-		float h00 = data[z0 * data_res + x0];
-		float h01 = data[z0 * data_res + x1];
-		float h10 = data[z1 * data_res + x0];
-		float h11 = data[z1 * data_res + x1];
+		T h00 = data[z0 * data_res + x0];
+		T h01 = data[z0 * data_res + x1];
+		T h10 = data[z1 * data_res + x0];
+		T h11 = data[z1 * data_res + x1];
 
 		// Interpolate
-		float h0 = lerp(h00, h01, xf);
-		float h1 = lerp(h10, h11, xf);
-		float h = lerp(h0, h1, zf);
+		T h0 = lerp(h00, h01, xf);
+		T h1 = lerp(h10, h11, xf);
+		T h = lerp(h0, h1, zf);
 
 		return h;
 	}
@@ -648,6 +656,37 @@ class HeightMap {
 		}
 	} */
 
+	// Wind map
+	glm::vec3 *wind_map;
+	int wind_res;
+
+	siv::PerlinNoise pn1;
+	siv::PerlinNoise pn2;
+
+	float frequency1 = 1.0f;
+	float frequency2 = 1.0f;
+
+	void generate_wind_map(float xoff = 0, float yoff = 0) {
+		// Random normals
+		float f1 = (frequency1/wind_res);
+		float f2 = (frequency2/wind_res);
+
+		for (int i = 0; i < wind_res * wind_res; i++) {
+			float x = fmod(i, wind_res) + xoff;
+			float y = i/float(wind_res) + yoff;
+
+			float h1 = pn1.octave2D_01(x * f1, y * f1, 4);
+			float h2 = pn2.octave2D_01(x * f2, y * f2, 4);
+
+			float theta = (2 * h1 - 1) * glm::pi <float> ();
+			glm::vec2 dir = glm::normalize(glm::vec2 {cos(theta), sin(theta)});
+
+			// z is strength of wind
+			float z = 0.5f * h2 + 0.5f;
+			wind_map[i] = 0.5f * glm::vec3(dir.x, dir.y, z) + 0.5f;
+		}
+	}
+
 	// TODO: keep outside, since its duplicate with grassmap
 	static unsigned int make_texture(uint8_t *data, int res) {
 		unsigned int tex;
@@ -669,11 +708,19 @@ public:
 	unsigned int	t_water_normal1;
 	unsigned int	t_water_normal2;
 
+	unsigned int	t_wind;
+
 	// Constructor
 	HeightMap(int resolution, float frequency, int octaves)
 			: data_res(resolution),
 			normals_res(2 * resolution),
-			water_res(resolution) {
+			water_res(resolution),
+			wind_res(resolution) {
+		srand(clock());
+		
+		pn1 = siv::PerlinNoise(rand());
+		pn2 = siv::PerlinNoise(rand());
+
 		// Allocate memory for heightmap
 		data = new float[data_res * data_res];
 		normals = new glm::vec3[normals_res * normals_res];
@@ -681,10 +728,16 @@ public:
 		water_level_data = new float[water_res * water_res];
 		water_level_normals = new glm::vec3[water_res * water_res];
 
+		wind_map = new glm::vec3[wind_res * wind_res];
+
 		// Generate heightmap and normals
 		generate_heightmap(frequency, octaves);
 		generate_normals();
 		// generate_water_level_map();
+		generate_wind_map();
+
+		/* for (int i = 0; i < 10; i++)
+			update_wind(); */
 
 		// Convert to byte array
 		uint8_t *image = new uint8_t[resolution * resolution];
@@ -723,7 +776,7 @@ public:
 
 		// Load water normal texture
 		int width, height;
-		
+
 		unsigned char *water_n1 = stbi_load(
 			"./water_normal1.jpg",
 			&width, &height,
@@ -766,10 +819,30 @@ public:
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, water_n2);
 		glBindImageTexture(8, t_water_normal2, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
 
+		// Wind map
+		glGenTextures(1, &t_wind);
+		glBindTexture(GL_TEXTURE_2D, t_wind);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, wind_res, wind_res, 0, GL_RGB, GL_FLOAT, wind_map);
+		glBindImageTexture(9, t_wind, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
+
 		// TODO: constexpr binding points
 
 		// Unbind textures
 		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+
+	// Update wind
+	// TODO: external wind
+	void update_wind(const glm::vec2 &wind) {
+		generate_wind_map(wind.x, wind.y);
+
+		// Update texture
+		glBindTexture(GL_TEXTURE_2D, t_wind);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, wind_res, wind_res, GL_RGB, GL_FLOAT, wind_map);
 	}
 
 	// Free memory manually

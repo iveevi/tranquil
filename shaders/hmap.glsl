@@ -27,10 +27,12 @@ Intersection intersect(Ray r, QuadraticBezier q)
 float hmap(float x, float z)
 {
 	vec2 uv1 = terrain_uv(vec2(x, z));
+	vec3 wind_offset = texture(s_wind, uv1).xyz;
+	vec2 woff = vec2(wind_offset.x, wind_offset.y) * wind_offset.z;
 
 	float h = scale * texture(s_heightmap, uv1).r;
 	if (grass == 1) {
-		vec2 uv2 = terrain_uv(vec2(x, z) + wind_offset/5.0f);
+		vec2 uv2 = terrain_uv(vec2(x, z) + woff/5.0f);
 		float g = texture(s_grassmap, uv2).r;
 		float l = texture(s_grass_length, uv2).r;
 		float p = texture(s_grass_power, uv2).r;
@@ -166,6 +168,20 @@ Intersection intersect_heightmap(Ray r)
 				} else if (grass_density == 1) {
 					vec2 uv = terrain_uv(vec2(p.x, p.z));
 					it.Kd.rgb = vec3(texture(s_grassmap, uv).r);
+				} else if (wind_map == 1) {
+					vec2 uv = terrain_uv(vec2(p.x, p.z));
+					it.Kd.rgb = texture(s_wind, uv).rgb;
+				} else {
+					// Gradient for under water
+					float d = p.y - water_level;
+					if (d < 0) {
+						vec3 sand = vec3(0.949,0.878,0.682);
+						if (d < -1.5)
+							it.Kd = sand;
+						else {
+							it.Kd = mix(sand, it.Kd, abs(d/3));
+						}
+					}
 				}
 
 				return it;
@@ -204,6 +220,9 @@ Intersection intersect_heightmap(Ray r)
 				} else if (grass_density == 1) {
 					vec2 uv = terrain_uv(vec2(p.x, p.z));
 					it.Kd.rgb = vec3(texture(s_grassmap, uv).r);
+				} else if (wind_map == 1) {
+					vec2 uv = terrain_uv(vec2(p.x, p.z));
+					it.Kd.rgb = texture(s_wind, uv).rgb;
 				}
 
 				return it;

@@ -8,6 +8,41 @@ Camera camera;
 State state;
 Shaders *shaders = nullptr;
 
+unsigned int make_texture_quad()
+{
+	// Set up vertex data
+	float vs[] = {
+		// positions		// texture coords
+		-1.0f,	-1.0f,	0.0f,	0.0f,	0.0f,
+		1.0f,	-1.0f,	0.0f,	1.0f,	0.0f,
+		-1.0f,	1.0f,	0.0f,	0.0f,	1.0f,
+		1.0f,	1.0f,	0.0f,	1.0f,	1.0f
+	};
+
+	// Set up vertex array object
+	unsigned int vao;
+
+	// Create vertex array object
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	// Create vertex buffer object
+	unsigned int vbo;
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+	// Upload vertex data
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vs), vs, GL_STATIC_DRAW);
+
+	// Set up vertex attributes
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) 0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) (sizeof(float) * 3));
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	return vao;
+}
+
 int main()
 {
 	GLFWwindow *window = initialize_graphics();
@@ -98,38 +133,11 @@ int main()
 	camera = Camera {origin, lookat, up};
 	camera.send_to_shader(shaders->pixelizer);
 
-	// Set up vertex data
-	float vs[] = {
-		// positions		// texture coords
-		-1.0f,	-1.0f,	0.0f,	0.0f,	0.0f,
-		1.0f,	-1.0f,	0.0f,	1.0f,	0.0f,
-		-1.0f,	1.0f,	0.0f,	0.0f,	1.0f,
-		1.0f,	1.0f,	0.0f,	1.0f,	1.0f
-	};
-
-	// Set up vertex array object
-	unsigned int vao;
-
-	// Create vertex array object
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
-
-	// Create vertex buffer object
-	unsigned int vbo;
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-
-	// Upload vertex data
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vs), vs, GL_STATIC_DRAW);
-
-	// Set up vertex attributes
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) 0);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) (sizeof(float) * 3));
-	glEnableVertexAttribArray(0);
-	glEnableVertexAttribArray(1);
+	// Create texture quad
+	unsigned int vao = make_texture_quad();
 
 	// Vertices of tile
-	Mesh tile = generate_tile(5);
+	Mesh tile = generate_tile(10);
 
 	BVH *bvh = tile.make_bvh();
 	BVHBuffer bvh_buffer;
@@ -170,8 +178,23 @@ int main()
 	int offy = 0;
 
 	glm::vec2 wind_velocity {0, 0};
+	glm::vec2 wind_acceleration {0, 0};
+	float theta_a = 0;
+
+	/* auto smootherstep = [](float x) {
+		if (x <= 0.0f) return 0.0f;
+		if (x >= 1.0f) return 1.0f;
+
+		float x3 = x * x * x;
+		float x4 = x3 * x;
+		float x5 = x3 * x * x;
+
+		return 6.0f * x5 - 15.0f * x4 + 10.0f * x3;
+	}; */
+
 	glm::vec2 water_offset {0, 0};
 	while (!glfwWindowShouldClose(window)) {
+		// TODO: frame.cpp
 		// Close if escape or q
 		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 			glfwSetWindowShouldClose(window, GL_TRUE);
@@ -236,13 +259,13 @@ int main()
 			glBindTexture(GL_TEXTURE_2D, cloud_density);
 			glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, cloud_resolution, cloud_resolution, 0, GL_RED, GL_UNSIGNED_BYTE, cloud_density_image);
 
-			// Random wind offset
+			/* Random wind offset
 			float angle = randf(-glm::pi <float> (), glm::pi <float> ());
 			float strength = 0.1f;
 
 			glm::vec2 next = strength * glm::vec2 {glm::cos(angle), glm::sin(angle)};
 			wind_velocity = lerp(wind_velocity, next, 0.1f);
-			wind_velocity = glm::clamp(wind_velocity, -0.5f, 0.5f);
+			wind_velocity = glm::clamp(wind_velocity, -0.5f, 0.5f); */
 
 			// Update wind offset
 			set_vec2(shaders->pixelizer, "wind_offset", wind_velocity);
@@ -251,6 +274,17 @@ int main()
 			water_offset += 0.5f * glm::normalize(glm::vec2 {randf(), randf()}) * dt;
 
 			set_vec2(shaders->pixelizer, "water_offset", water_offset);
+
+			// Update wind map
+			float theta = randf(-1, 1) * glm::pi <float> ();
+			theta_a = lerp(theta_a, theta, 0.2f);
+
+			wind_acceleration += 0.5f * glm::vec2 {glm::cos(theta_a), glm::sin(theta_a)};
+			wind_acceleration = glm::clamp(wind_acceleration, -0.5f, 0.5f);
+
+			wind_velocity += wind_acceleration * dt * 25.0f;
+			// wind_velocity = glm::clamp(wind_velocity, -1.0f, 1.0f);
+			heightmap.update_wind(wind_velocity);
 		}
 
 		// Update sun direction, should lie on the x = z plane
@@ -295,6 +329,9 @@ int main()
 			glActiveTexture(GL_TEXTURE10);
 			glBindTexture(GL_TEXTURE_2D, heightmap.t_water_normal2);
 
+			glActiveTexture(GL_TEXTURE11);
+			glBindTexture(GL_TEXTURE_2D, heightmap.t_wind);
+
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vertices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, ssbo_bvh);
@@ -321,8 +358,8 @@ int main()
 			glUseProgram(shaders->texturizer);
 
 			glActiveTexture(GL_TEXTURE0);
+			// glBindTexture(GL_TEXTURE_2D, heightmap.t_wind);
 			glBindTexture(GL_TEXTURE_2D, texture);
-			// glBindTexture(GL_TEXTURE_2D, heightmap.t_water_normal);
 
 			glBindVertexArray(vao);
 			glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -346,16 +383,25 @@ int main()
 				if (ImGui::Checkbox("Show grass map", &state.show_grass_map)) {
 					state.show_grass_length = false;
 					state.show_grass_power = false;
+					state.show_wind_map = false;
 				}
 
 				if (ImGui::Checkbox("Show grass length", &state.show_grass_length)) {
 					state.show_grass_map = false;
 					state.show_grass_power = false;
+					state.show_wind_map = false;
 				}
 
 				if (ImGui::Checkbox("Show grass power", &state.show_grass_power)) {
 					state.show_grass_map = false;
 					state.show_grass_length = false;
+					state.show_wind_map = false;
+				}
+				
+				if (ImGui::Checkbox("Show wind map", &state.show_wind_map)) {
+					state.show_grass_length = false;
+					state.show_grass_power = false;
+					state.show_grass_map = false;
 				}
 
 				ImGui::Checkbox("Show normals", &state.show_normals);
