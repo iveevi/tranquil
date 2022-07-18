@@ -172,6 +172,41 @@ float _intersect_time(Ray r, QuadraticBezier qb)
 	return t.y;
 }
 
+// Coarse ray-quadratic bezier intersection
+float _coarse_intersect_time(Ray r, QuadraticBezier qb)
+{
+	// Pretend its a triangle (for thickness)
+	vec3 n1 = thickness * normalize(cross(qb.v3 - qb.v1, r.d));
+
+	vec3 v1 = qb.v3;
+	vec3 v2 = qb.v1 - n1;
+	vec3 v3 = qb.v1 + n1;
+
+	// Triangle intersection routine
+	// TODO: optimize and use a line intersection routine instead
+	vec3 e1 = v2 - v1;
+	vec3 e2 = v3 - v1;
+	vec3 s1 = cross(r.d, e2);
+	float divisor = dot(s1, e1);
+	if (divisor == 0.0)
+		return -1.0;
+	vec3 s = r.p - v1;
+	float inv_divisor = 1.0 / divisor;
+	float b1 = dot(s, s1) * inv_divisor;
+	if (b1 < 0.0 || b1 > 1.0)
+		return -1.0;
+	vec3 s2 = cross(s, e1);
+	float b2 = dot(r.d, s2) * inv_divisor;
+	if (b2 < 0.0 || b1 + b2 > 1.0)
+		return -1.0;
+	float time = dot(e2, s2) * inv_divisor;
+	return time;
+
+	/* TODO: fix this to use normal
+	Triangle t1 = Triangle(v1, qb.v1, qb.v1 + 2 * thickness * n1);
+	return _intersect_time(r, t1); */
+}
+
 struct Intersection {
 	float t;
 	vec3 p;

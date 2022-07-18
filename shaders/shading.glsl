@@ -1,3 +1,15 @@
+// Sky color
+vec3 sky_color(Ray r)
+{
+	float k = pow(max(dot(r.d, light_dir), 0), 32);
+
+	vec3 sky = vec3(0.6, 0.6, 0.9);
+	vec3 sun = light_intensity;
+
+	// TODO: more gradual chjange to sun (but keep the intensity)
+	return mix(sky, sun, k);
+}
+
 // TODO: function for color palette-ing
 
 float vec_min(vec3 v)
@@ -72,34 +84,59 @@ vec3 shade(Intersection it)
 	return color;
 }
 
-vec4 shade(Intersection it, Ray r)
+// Fresnel reflection for water
+// etaI = 1.0f, etaT = 1.5f
+float fresnel_water(float cos_theta_i)
+{
+	float etaI = 1.0f;
+	float etaT = 1.5f;
+
+	float sin_theta_i = sqrt(max((1.0f - cos_theta_i * cos_theta_i), 0.0f));
+	float sin_theta_t = (etaI / etaT) * sin_theta_i;
+	float cos_theta_t = sqrt(max((1.0f - sin_theta_t * sin_theta_t), 0.0f));
+
+	float r_parallel = ((etaT * cos_theta_i) - (etaI * cos_theta_t))/((etaT * cos_theta_i) + (etaI * cos_theta_t));
+	float r_perpendicular = ((etaI * cos_theta_i) - (etaT * cos_theta_t))/((etaI * cos_theta_i) + (etaT * cos_theta_t));
+
+	return (r_parallel * r_parallel + r_perpendicular * r_perpendicular) / 2.0f;
+}
+
+vec4 shade(Intersection it, Ray ray)
 {
 	// In case of water
+	vec4 c;
 	if (it.shading == eWater) {
 		// Reflection ray
-		vec3 r = reflect(r.d, it.n);
+		vec3 r = reflect(ray.d, it.n);
 		Ray refl_ray = Ray(it.p + it.n * ray_shadow_step, r);
 
-		vec3 refl_color = vec3(0.5, 0.5, 0.5);
+		vec3 refl_color = sky_color(refl_ray);
 
 		Intersection refl_it = trace(refl_ray, false);
 		if (refl_it.id != -1)
 			refl_color = shade(refl_it);
 
 		// Refraction ray
-		vec3 t = refract(r, it.n, 1.0f / 1.33f);
+		vec3 t = refract(ray.d, it.n, 1.0f / 1.5f);
 		Ray refr_ray = Ray(it.p - it.n * ray_shadow_step, t);
 
-		vec3 refr_color = vec3(0.5, 0.5, 0.5);
+		vec3 refr_color = vec3(0);
 
 		Intersection refr_it = trace(refr_ray, false);
 		if (refr_it.id != -1)
 			refr_color = shade(refr_it);
 
-		// TODO: mix based on skim angle/fresnel
-		vec3 color = vec3(0.7, 0.7, 1) * mix(refl_color, refr_color, 0.5);
-		return vec4(color, 1.0f);
+		// Angle between ray and surface (normal)
+		float cos_theta = abs(dot(ray.d, it.n));
+		float Fr = fresnel_water(cos_theta);
+		vec3 color = mix(refl_color, refr_color, 1 - Fr);
+		const vec3 water_color = vec3(0.7, 0.7, 1);
+		c = vec4(water_color * color, 1.0f);
+	} else {
+		c = vec4(shade(it), 1.0f);
 	}
 
-	return vec4(shade(it), 1.0f);
+	// Gamma correction
+	c.rgb = pow(c.rgb, vec3(1.0f/2.2f));
+	return c;
 }

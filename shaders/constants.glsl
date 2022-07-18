@@ -23,7 +23,7 @@ float zmax = terrain_size * 0.5f;
 float scale = 2.0f;
 
 // Shading
-const vec3 light_intensity = vec3(1, 1, 0.8);
+const vec3 light_intensity = 2 * vec3(1, 1, 0.6);
 
 // Terrain uv
 vec2 terrain_uv(vec2 xz)

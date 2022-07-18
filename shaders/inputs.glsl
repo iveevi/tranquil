@@ -24,6 +24,7 @@ layout (binding = 4) uniform sampler2D s_grassmap;
 layout (binding = 5) uniform sampler2D s_grassmap_normal;
 layout (binding = 6) uniform sampler2D s_grass_length;
 layout (binding = 7) uniform sampler2D s_grass_power;
+layout (binding = 8) uniform sampler2D s_water_level;
 
 uniform int width;
 uniform int height;

@@ -526,7 +526,7 @@ class HeightMap {
 	int		data_res;
 
 	// Generate heightmap
-	void generate_grassmap(float frequency, int octaves) {
+	void generate_heightmap(float frequency, int octaves) {
 		srand(clock());
 
 		// Perlin noise generator
@@ -608,35 +608,78 @@ class HeightMap {
 			}
 		}
 	}
+
+	// Water level
+	// NOTE: two modes:
+	// 1. water level is flat: only normal texture is used
+	// 2. water has a source stream, solve for stable water level
+
+	// Water level heightmap
+	float *water_level_data;
+	int water_res;
+
+	void generate_water_level_map() {
+		// Flat water level
+		float water_level = 1.2f;
+		for (int i = 0; i < water_res * water_res; i++)
+			water_level_data[i] = water_level;
+	}
+
+	// TODO: keep outside, since its duplicate with grassmap
+	static unsigned int make_texture(uint8_t *data, int res) {
+		unsigned int tex;
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, res, res, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+		glBindImageTexture(1, tex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+		return tex;
+	}
 public:
 	unsigned int	t_height;
 	unsigned int	t_normal;
 
+	unsigned int	t_water_level;
+
 	// Constructor
 	HeightMap(int resolution, float frequency, int octaves)
-			: data_res(resolution), normals_res(2 * resolution) {
+			: data_res(resolution),
+			normals_res(2 * resolution),
+			water_res(resolution) {
 		// Allocate memory for heightmap
 		data = new float[data_res * data_res];
 		normals = new glm::vec3[normals_res * normals_res];
+		water_level_data = new float[water_res * water_res];
 
 		// Generate heightmap and normals
-		generate_grassmap(frequency, octaves);
+		generate_heightmap(frequency, octaves);
 		generate_normals();
+		generate_water_level_map();
 
 		// Convert to byte array
 		uint8_t *image = new uint8_t[resolution * resolution];
+		uint8_t *water_image = new uint8_t[water_res * water_res];
+
 		for (int i = 0; i < resolution * resolution; i++)
 			image[i] = (uint8_t) (data[i] * std::numeric_limits <uint8_t> ::max());
 
+		for (int i = 0; i < water_res * water_res; i++)
+			water_image[i] = (uint8_t) (water_level_data[i] * std::numeric_limits <uint8_t> ::max());
+
 		// Create texture
-		glGenTextures(1, &t_height);
+		t_height = make_texture(image, resolution);
+
+		/* glGenTextures(1, &t_height);
 		glBindTexture(GL_TEXTURE_2D, t_height);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, resolution, resolution, 0, GL_RED, GL_UNSIGNED_BYTE, image);
-		glBindImageTexture(5, t_height, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8);
+		glBindImageTexture(5, t_height, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8); */
 
 		// Create normal texture
 		glGenTextures(1, &t_normal);
@@ -648,12 +691,17 @@ public:
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, normals_res, normals_res, 0, GL_RGB, GL_FLOAT, normals);
 		glBindImageTexture(6, t_normal, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGB32F);
 
+		// Create water level texture
+		t_water_level = make_texture(water_image, water_res);
+
 		// TODO: constexpr binding points
 
 		// Unbind textures
 		glBindTexture(GL_TEXTURE_2D, 0);
+	}
 
-		// Free memory
+	// Free memory manually
+	void free() {
 		delete[] data;
 		delete[] normals;
 	}
@@ -666,8 +714,10 @@ class GrassMap {
 	float		*grass_power;
 	int		data_res;
 
+	// TODO: avoid grass blades in water
+
 	// Generate heightmap
-	void generate_heightmap(float frequency, int octaves) {
+	void generate_grassmap(float frequency, int octaves) {
 		srand(clock());
 
 		// Perlin noise generator
@@ -790,7 +840,7 @@ public:
 		normals = new glm::vec3[normals_res * normals_res];
 
 		// Generate heightmap and normals
-		generate_heightmap(frequency, octaves);
+		generate_grassmap(frequency, octaves);
 		generate_normals();
 
 		// Convert to byte array

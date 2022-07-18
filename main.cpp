@@ -171,7 +171,6 @@ int main()
 	int offy = 0;
 
 	glm::vec2 wind_velocity {0, 0};
-
 	while (!glfwWindowShouldClose(window)) {
 		// Close if escape or q
 		if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
@@ -280,6 +279,8 @@ int main()
 			glBindTexture(GL_TEXTURE_2D, grassmap.t_length);
 			glActiveTexture(GL_TEXTURE7);
 			glBindTexture(GL_TEXTURE_2D, grassmap.t_power);
+			glActiveTexture(GL_TEXTURE8);
+			glBindTexture(GL_TEXTURE_2D, heightmap.t_water_level);
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo_vertices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
@@ -352,7 +353,7 @@ int main()
 			// Info window
 			{
 				ImGui::Begin("Info");
-				ImGui::Text("framerate: %.1f", ImGui::GetIO().Framerate);
+				ImGui::Text("frametime: %.1f ms", 1000.0f/ImGui::GetIO().Framerate);
 				ImGui::Text("primitives: %lu", tile.triangles.size());
 				ImGui::End();
 			}

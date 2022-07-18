@@ -61,6 +61,30 @@ Intersection intersect(Ray r, Quad q)
 	return it;
 }
 
+Intersection intersect_coarse(Ray r, QuadraticBezier q)
+{
+	float t = _coarse_intersect_time(r, q);
+	if (t < 0.0)
+		return def_it();
+
+	Intersection it;
+	it.id = primitives + 2;
+	it.p = r.p + r.d * t;
+	it.shading = eGrassBlade;
+	it.t = t;
+	it.Kd = vec3(0.4, 0.9, 0.4);
+
+	vec3 e1 = q.v2 - q.v1;
+	vec3 e2 = q.v3 - q.v1;
+
+	vec3 n = normalize(cross(e1, e2));
+	/* if (dot(n, r.d) > 0.0)
+		n = -n; */
+	it.n = n;
+
+	return it;
+}
+
 // RNG
 uvec3 pcg3d(uvec3 v)
 {
@@ -148,7 +172,13 @@ Intersection intersect_grass_blades(Ray ray)
 					vec3(xp + wo.x, y + l, zp + wo.y)
 				);
 
-				Intersection it = intersect(ray, qb);
+				Intersection it = def_it();
+				float dist = distance(ray.p, qb.v1);
+				if (dist > 10.0f)
+					it = intersect_coarse(ray, qb);
+				else
+					it = intersect(ray, qb);
+
 				if (it.id != -1) {
 					// If shadowing, then prioritize grass
 					// over heightmap (stronger shadow)
@@ -208,6 +238,14 @@ Intersection intersect_water(Ray r)
 // TODO: bool porameter for shadowing or not
 Intersection trace(Ray ray, bool shadow)
 {
+	/* QuadraticBezier qb = QuadraticBezier(
+		vec3(0),
+		vec3(0),
+		vec3(0, 1, 0)
+	);
+
+	return intersect_coarse(ray, qb); */
+
 	// "Min" intersection
 	// TODO: configs for self shadowing?
 	Intersection mini = intersect_heightmap(ray);

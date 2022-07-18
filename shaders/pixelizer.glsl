@@ -19,9 +19,7 @@ void main()
 	Ray r = generate_ray(uv);
 
 	// Base color gets brighter as ray and light dir
-	float k = pow(max(dot(r.d, light_dir), 0), 8) * 0.5 + 0.5;
-	// vec4 color = vec4(k, k, 0.7, 1.0);
-	vec4 color = vec4(0.5, 0.5, 0.7, 1.0);
+	vec4 color = vec4(sky_color(r), 1.0);
 
 	// Intersection it = intersect_heightmap(r);
 	Intersection it = trace(r, false);
