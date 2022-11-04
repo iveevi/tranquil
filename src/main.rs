@@ -5,8 +5,10 @@ extern crate glium;
 
 // Modules
 mod math;
+mod io;
 
 use math::*;
+use io::*;
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -59,24 +61,28 @@ fn main()
 
     // Setup Glium
     use glium::{glutin, Surface};
+    use glium::glutin::event::VirtualKeyCode;
 
     let mut event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new();
     let cb = glutin::ContextBuilder::new();
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
+    // Event handlers
+    let mut keyboard = Keyboard::new();
+
     // Testing mesh
-    let vertex1 = Vertex { position: [-0.5, -0.5, 5.0] };
-    let vertex2 = Vertex { position: [ 0.0,  0.5, 5.0] };
-    let vertex3 = Vertex { position: [ 0.5, -0.25, 5.0] };
+    let vertex1 = Vertex { position: [-0.5, -0.5, 0.0] };
+    let vertex2 = Vertex { position: [ 0.0,  0.5, 0.0] };
+    let vertex3 = Vertex { position: [ 0.5, -0.25, 0.0] };
 
     let mut shape = vec![vertex1, vertex2, vertex3];
 
     // Add offset triangles
     for i in 0..10 {
-        let vertex1 = Vertex { position: [-0.5, -0.5, 5.0 + i as f32] };
-        let vertex2 = Vertex { position: [ 0.0,  0.5, 5.0 + i as f32] };
-        let vertex3 = Vertex { position: [ 0.5, -0.25, 5.0 + i as f32] };
+        let vertex1 = Vertex { position: [-0.5, -0.5, -i as f32] };
+        let vertex2 = Vertex { position: [ 0.0,  0.5, -i as f32] };
+        let vertex3 = Vertex { position: [ 0.5, -0.25, -i as f32] };
 
         shape.push(vertex1);
         shape.push(vertex2);
@@ -93,11 +99,12 @@ fn main()
     ).unwrap();
 
     let epoch = std::time::Instant::now();
+    let mut prev = std::time::Instant::now();
 
     event_loop.run(move |ev, _, control_flow| {
         // Draw to screen
         let mut target = display.draw();
-        target.clear_color(0.0, 0.0, 1.0, 1.0);
+        target.clear_color(0.0, 0.0, 0.0, 1.0);
 
         let uniforms = uniform! {
             model: Matrix::identity().data,
@@ -112,17 +119,31 @@ fn main()
 
         target.finish().unwrap();
 
-        // Move camera in a circle
-        let t = std::time::Instant::now();
-        let t = t.duration_since(epoch).as_secs_f32();
-        let x = t.cos() * 5.0;
-        let z = t.sin() * 5.0;
+        // Get delta time
+        let now = std::time::Instant::now();
+        let delta = now.duration_since(prev).as_secs_f32();
+        prev = now;
 
-        camera.transform.data[0][3] = x;
-        camera.transform.data[2][3] = z;
+        // Camera movement
+        let speed = 5.0 * delta;
 
-        println!("\nt = {}, x = {}, z = {}", t, x, z);
-        println!("\tCamera: {:?}", camera.transform.position());
+        if keyboard.is_pressed(VirtualKeyCode::W) {
+            camera.transform.data[2][3] -= speed;
+        } else if keyboard.is_pressed(VirtualKeyCode::S) {
+            camera.transform.data[2][3] += speed;
+        }
+
+        if keyboard.is_pressed(VirtualKeyCode::A) {
+            camera.transform.data[0][3] += speed;
+        } else if keyboard.is_pressed(VirtualKeyCode::D) {
+            camera.transform.data[0][3] -= speed;
+        }
+
+        if keyboard.is_pressed(VirtualKeyCode::Q) {
+            camera.transform.data[1][3] -= speed;
+        } else if keyboard.is_pressed(VirtualKeyCode::E) {
+            camera.transform.data[1][3] += speed;
+        }
 
         // Schedule a redraw
         let next_frame_time = std::time::Instant::now()
@@ -139,6 +160,8 @@ fn main()
                 },
 
                 glutin::event::WindowEvent::KeyboardInput { input, .. } => {
+                    keyboard.update(input.virtual_keycode.unwrap(), input.state);
+
                     if let Some(glutin::event::VirtualKeyCode::Escape) = input.virtual_keycode {
                         *control_flow = glutin::event_loop::ControlFlow::Exit;
                         return;

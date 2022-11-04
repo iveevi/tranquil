@@ -118,10 +118,10 @@ impl Matrix {
 
         Matrix {
             data: [
-                [s.x, u.x, f.x, 0.0],
-                [s.y, u.y, f.y, 0.0],
-                [s.z, u.z, f.z, 0.0],
-                [-dot(s, eye), -dot(u, eye), -dot(f, eye), 1.0],
+                [s.x, u.x, -f.x, 0.0],
+                [s.y, u.y, -f.y, 0.0],
+                [s.z, u.z, -f.z, 0.0],
+                [-dot(s, eye), -dot(u, eye), dot(f, eye), 1.0],
             ]
         }
     }
