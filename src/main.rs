@@ -4,10 +4,9 @@ use std::fs;
 extern crate glium;
 
 // Modules
-mod math;
 mod io;
 
-use math::*;
+use cgmath::InnerSpace;
 use io::*;
 
 #[derive(Copy, Clone)]
@@ -17,40 +16,114 @@ struct Vertex {
 
 implement_vertex!(Vertex, position);
 
-// Camera
-#[derive(Copy, Clone, Debug)]
-struct Camera {
-    fov: f32,
-    transform: Matrix,
+use cgmath::Vector3;
+use cgmath::Vector4;
+use cgmath::Matrix4;
+use cgmath::Rad;
+use cgmath::Point3;
+use cgmath::PerspectiveFov;
+use cgmath::Euler;
+use cgmath::Quaternion;
+use cgmath::Deg;
+
+#[derive(Copy, Clone)]
+struct Transform {
+    position: Vector3 <f32>,
+    rotation: Vector3 <f32>, // In degrees
+    scale: Vector3 <f32>,
 }
 
-impl Camera {
-    fn new() -> Camera {
-        Camera {
-            fov: 90.0,
-            transform: Matrix::identity(),
+impl Transform {
+    fn new() -> Transform {
+        Transform {
+            position: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Vector3::new(0.0, 0.0, 0.0),
+            scale: Vector3::new(1.0, 1.0, 1.0),
         }
     }
 
-    fn view(&self) -> Matrix {
-        Matrix::look_at(
-            self.transform.position(),
-            self.transform.position() + self.transform.forward(),
-            self.transform.up()
-        )
+    fn matrix(&self) -> Matrix4 <f32> {
+        let translate = Matrix4::from_translation(self.position);
+
+        let quat = Quaternion::from(
+            Euler {
+                x: Deg(self.rotation.x),
+                y: Deg(self.rotation.y),
+                z: Deg(self.rotation.z),
+            }
+        );
+
+        let rotate = Matrix4::from(quat);
+        let scale = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
+
+        translate * rotate * scale
     }
 
-    fn perspective(&self) -> Matrix {
-        Matrix::perspective(self.fov, 1.0, 0.1, 100.0)
+    // Get axes
+    fn forward(&self) -> Vector3 <f32> {
+        let matrix = self.matrix();
+        let forward = Vector4::new(0.0, 0.0, -1.0, 0.0);
+        let forward = matrix * forward;
+        Vector3::new(forward.x, forward.y, forward.z)
+    }
+
+    fn right(&self) -> Vector3 <f32> {
+        let matrix = self.matrix();
+        let right = Vector4::new(1.0, 0.0, 0.0, 0.0);
+        let right = matrix * right;
+        Vector3::new(right.x, right.y, right.z)
+    }
+
+    fn up(&self) -> Vector3 <f32> {
+        let matrix = self.matrix();
+        let up = Vector4::new(0.0, 1.0, 0.0, 0.0);
+        let up = matrix * up;
+        Vector3::new(up.x, up.y, up.z)
     }
 }
+
+// Camera
+#[derive(Copy, Clone, Debug)]
+struct Camera {
+    fov: f32
+}
+
+impl Camera {
+    // Constructor
+    fn new() -> Camera {
+        Camera {
+            fov: 90.0
+        }
+    }
+
+    fn perspective(&self) -> Matrix4 <f32> {
+        PerspectiveFov {
+            fovy: Rad(self.fov.to_radians()),
+            aspect: 1.0,
+            near: 0.1,
+            far: 100.0,
+        }.into()
+    }
+}
+
+// Mouse cursor state
+struct MouseGimbal {
+    x: f32,
+    y: f32,
+    sensitivity: f32,
+    yaw: Rad <f32>,
+    pitch: Rad <f32>,
+    drag: bool,
+}
+
+use std::f32::consts::FRAC_PI_2;
+
+const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
 
 fn main()
 {
     let mut camera = Camera::new();
-    println!("Camera: {:?}", camera);
-    println!("View: {:?}", camera.view());
-    println!("Perspective: {:?}", camera.perspective());
+    let mut transform = Transform::new();
 
     // Read vertex and fragment shaders
     let vertex_shader_src = fs::read_to_string("src/base.vert")
@@ -70,7 +143,7 @@ fn main()
 
     // Event handlers
     let mut keyboard = Keyboard::new();
-
+    
     // Testing mesh
     let vertex1 = Vertex { position: [-0.5, -0.5, 0.0] };
     let vertex2 = Vertex { position: [ 0.0,  0.5, 0.0] };
@@ -101,15 +174,44 @@ fn main()
     let epoch = std::time::Instant::now();
     let mut prev = std::time::Instant::now();
 
+    let mut mouse_cursor = MouseGimbal {
+        x: 0.0,
+        y: 0.0,
+        sensitivity: 0.005,
+        yaw: Rad(FRAC_PI_2),
+        pitch: Rad(0.0),
+        drag: false,
+    };
+
     event_loop.run(move |ev, _, control_flow| {
         // Draw to screen
         let mut target = display.draw();
         target.clear_color(0.0, 0.0, 0.0, 1.0);
 
+        let mut t = Transform::new();
+
+        let model : [[f32; 4]; 4] = t.matrix().into();
+        let perspective : [[f32; 4]; 4] = camera.perspective().into();
+
+        let pos = Point3::new(transform.position.x, transform.position.y, transform.position.z);
+        
+        let yaw = mouse_cursor.yaw;
+        let pitch = mouse_cursor.pitch;
+
+        let view : [[f32; 4]; 4] = Matrix4::look_to_rh(
+            pos,
+            Vector3::new(
+                yaw.0.cos(),
+                pitch.0.sin(),
+                yaw.0.sin(),
+            ).normalize(),
+            Vector3::unit_y(),
+        ).into();
+
         let uniforms = uniform! {
-            model: Matrix::identity().data,
-            view: camera.view().data,
-            projection: camera.perspective().data,
+            model: model,
+            view: view,
+            projection: perspective,
         };
 
         target.draw(
@@ -127,22 +229,28 @@ fn main()
         // Camera movement
         let speed = 5.0 * delta;
 
+        // let up = transform.up();
+
+        let (yaw_sin, yaw_cos) = yaw.0.sin_cos();
+        let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
+        let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
+
         if keyboard.is_pressed(VirtualKeyCode::W) {
-            camera.transform.data[2][3] -= speed;
+            transform.position += forward * speed;
         } else if keyboard.is_pressed(VirtualKeyCode::S) {
-            camera.transform.data[2][3] += speed;
+            transform.position -= forward * speed;
         }
 
         if keyboard.is_pressed(VirtualKeyCode::A) {
-            camera.transform.data[0][3] += speed;
+            transform.position -= right * speed;
         } else if keyboard.is_pressed(VirtualKeyCode::D) {
-            camera.transform.data[0][3] -= speed;
+            transform.position += right * speed;
         }
 
         if keyboard.is_pressed(VirtualKeyCode::Q) {
-            camera.transform.data[1][3] -= speed;
+            transform.position -= speed * Vector3::unit_y();
         } else if keyboard.is_pressed(VirtualKeyCode::E) {
-            camera.transform.data[1][3] += speed;
+            transform.position += speed * Vector3::unit_y();
         }
 
         // Schedule a redraw
@@ -154,20 +262,51 @@ fn main()
         // Manage events
         match ev {
             glutin::event::Event::WindowEvent { event, .. } => match event {
+                // Close requests
                 glutin::event::WindowEvent::CloseRequested => {
                     *control_flow = glutin::event_loop::ControlFlow::Exit;
                     return;
                 },
 
+                // Keyboard events
                 glutin::event::WindowEvent::KeyboardInput { input, .. } => {
                     keyboard.update(input.virtual_keycode.unwrap(), input.state);
+                },
 
-                    if let Some(glutin::event::VirtualKeyCode::Escape) = input.virtual_keycode {
-                        *control_flow = glutin::event_loop::ControlFlow::Exit;
-                        return;
+                // Mouse events
+                glutin::event::WindowEvent::MouseInput { state, button, .. } => {
+                    if button == glutin::event::MouseButton::Left {
+                        mouse_cursor.drag = state == glutin::event::ElementState::Pressed;
                     }
                 },
 
+                glutin::event::WindowEvent::CursorMoved { position, .. } => {
+                    let x : f32 = position.x as f32;
+                    let y : f32 = position.y as f32;
+
+                    if mouse_cursor.drag {
+                        let dx : f32 = x - mouse_cursor.x;
+                        let dy : f32 = y - mouse_cursor.y;
+
+                        let sensitivity = mouse_cursor.sensitivity;
+
+                        mouse_cursor.yaw += Rad(dx * sensitivity);
+                        mouse_cursor.pitch -= Rad(dy * sensitivity);
+
+                        if mouse_cursor.pitch > Rad(SAFE_FRAC_PI_2) {
+                            mouse_cursor.pitch = Rad(SAFE_FRAC_PI_2);
+                        } else if mouse_cursor.pitch < Rad(-SAFE_FRAC_PI_2) {
+                            mouse_cursor.pitch = Rad(-SAFE_FRAC_PI_2);
+                        }
+
+                        println!("Yaw: {}, Pitch: {}", mouse_cursor.yaw.0, mouse_cursor.pitch.0);
+                    } 
+
+                    mouse_cursor.x = x;
+                    mouse_cursor.y = y;
+                },
+
+                // Other events
                 _ => return,
             },
             _ => (),
