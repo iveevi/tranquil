@@ -156,7 +156,7 @@ GLFWwindow *initialize_graphics()
 	if (!glfwInit())
 		return nullptr;
 
-	window = glfwCreateWindow(WIDTH, HEIGHT, "Weaxor", NULL, NULL);
+	window = glfwCreateWindow(WIDTH, HEIGHT, "Tranquil", NULL, NULL);
 
 	// Check if window was created
 	if (!window) {
