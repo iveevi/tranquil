@@ -34,10 +34,61 @@ struct MouseState {
     drag: bool,
 }
 
-fn main()
-{
+// Manage camera motion with keyboard
+fn camera_keyboard_movement(camera: &mut Camera, keyboard: &Keyboard, delta_time: f32) {
+    use glium::glutin::event::VirtualKeyCode;
+
+    let speed = 5.0 * delta_time;
+
+    let forward = camera.forward();
+    let right = camera.right();
+
+    if keyboard.is_pressed(VirtualKeyCode::W) {
+        camera.position += forward * speed;
+    } else if keyboard.is_pressed(VirtualKeyCode::S) {
+        camera.position -= forward * speed;
+    }
+
+    if keyboard.is_pressed(VirtualKeyCode::A) {
+        camera.position -= right * speed;
+    } else if keyboard.is_pressed(VirtualKeyCode::D) {
+        camera.position += right * speed;
+    }
+
+    if keyboard.is_pressed(VirtualKeyCode::Q) {
+        camera.position -= speed * Vector3::unit_y();
+    } else if keyboard.is_pressed(VirtualKeyCode::E) {
+        camera.position += speed * Vector3::unit_y();
+    }
+}
+
+// Manage camera motion with mouse
+fn camera_mouse_movement(camera: &mut Camera, state: &mut MouseState, position: (f32, f32)) {
+    let x : f32 = position.0 as f32;
+    let y : f32 = position.1 as f32;
+
+    if state.drag {
+        let dx : f32 = x - state.x;
+        let dy : f32 = y - state.y;
+
+        let sensitivity = state.sensitivity;
+
+        camera.yaw += Rad(dx * sensitivity);
+        camera.pitch -= Rad(dy * sensitivity);
+
+        if camera.pitch > Rad(SAFE_FRAC_PI_2) {
+            camera.pitch = Rad(SAFE_FRAC_PI_2);
+        } else if camera.pitch < Rad(-SAFE_FRAC_PI_2) {
+            camera.pitch = Rad(-SAFE_FRAC_PI_2);
+        }
+    } 
+
+    state.x = x;
+    state.y = y;
+}
+
+fn main() {
     let mut camera = Camera::new();
-    let mut transform = Transform::new();
 
     // Read vertex and fragment shaders
     let vertex_shader_src = fs::read_to_string("src/base.vert")
@@ -48,7 +99,6 @@ fn main()
 
     // Setup Glium
     use glium::{glutin, Surface};
-    use glium::glutin::event::VirtualKeyCode;
 
     let mut event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new();
@@ -77,12 +127,57 @@ fn main()
     }
 
     let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
-    let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+    let indices = glium::index::NoIndices(
+        glium::index::PrimitiveType::Patches {
+            vertices_per_patch: 3
+        }
+    );
 
     // Load shaders
-    let program = glium::Program::from_source(
-        &display, &vertex_shader_src,
-        &fragment_shader_src, None
+    let program = glium::Program::new(
+        &display,
+        glium::program::SourceCode {
+            vertex_shader: &vertex_shader_src,
+            tessellation_control_shader: Some("
+                #version 450
+
+                layout (vertices = 3) out;
+
+                uniform int tess_level = 10;
+
+                void main() {
+                    gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
+
+                    gl_TessLevelOuter[0] = tess_level;
+                    gl_TessLevelOuter[1] = tess_level;
+                    gl_TessLevelOuter[2] = tess_level;
+                    gl_TessLevelInner[0] = tess_level;
+                }
+            "),
+            tessellation_evaluation_shader: Some("
+                #version 450
+
+                layout (triangles, equal_spacing, ccw) in;
+
+                uniform mat4 view;
+                uniform mat4 projection;
+
+                out vec3 fpos;
+
+                void main() {
+                    vec4 p0 = gl_TessCoord.x * gl_in[0].gl_Position;
+                    vec4 p1 = gl_TessCoord.y * gl_in[1].gl_Position;
+                    vec4 p2 = gl_TessCoord.z * gl_in[2].gl_Position;
+
+                    vec4 pos = p0 + p1 + p2;
+
+                    gl_Position = projection * view * pos;
+                    fpos = pos.xyz;
+                }
+            "),
+            geometry_shader: None,
+            fragment_shader: &fragment_shader_src,
+        }
     ).unwrap();
 
     let epoch = std::time::Instant::now();
@@ -103,7 +198,7 @@ fn main()
 
         // Draw to screen
         let mut target = display.draw();
-        target.clear_color(0.0, 0.0, 0.0, 1.0);
+        target.clear_color_and_depth((0.0, 0.0, 0.0, 1.0), 1.0);
 
         // Transforming the objetcs
         let mut t = Transform::new();
@@ -114,9 +209,9 @@ fn main()
         t.rotation.z = time * 10.0;
 
         // Drawing
-        let model : [[f32; 4]; 4] = t.matrix().into();
-        let view : [[f32; 4]; 4] = camera.view().into();
-        let perspective : [[f32; 4]; 4] = camera.perspective().into();
+        let model: [[f32; 4]; 4] = t.matrix().into();
+        let view: [[f32; 4]; 4] = camera.view().into();
+        let perspective: [[f32; 4]; 4] = camera.perspective().into();
 
         let uniforms = uniform! {
             model: model,
@@ -124,36 +219,25 @@ fn main()
             projection: perspective,
         };
 
+        let params = glium::DrawParameters {
+            depth: glium::Depth {
+                test: glium::DepthTest::IfLessOrEqual,
+                write: true,
+                ..Default::default()
+            },
+            polygon_mode: glium::draw_parameters::PolygonMode::Line,
+            ..Default::default()
+        };
+
         target.draw(
             &vertex_buffer, &indices, &program,
-            &uniforms, &Default::default()
+            &uniforms, &params
         ).unwrap();
 
         target.finish().unwrap();
 
         // Camera movement
-        let speed = 5.0 * delta;
-
-        let forward = camera.forward();
-        let right = camera.right();
-
-        if keyboard.is_pressed(VirtualKeyCode::W) {
-            camera.position += forward * speed;
-        } else if keyboard.is_pressed(VirtualKeyCode::S) {
-            camera.position -= forward * speed;
-        }
-
-        if keyboard.is_pressed(VirtualKeyCode::A) {
-            camera.position -= right * speed;
-        } else if keyboard.is_pressed(VirtualKeyCode::D) {
-            camera.position += right * speed;
-        }
-
-        if keyboard.is_pressed(VirtualKeyCode::Q) {
-            camera.position -= speed * Vector3::unit_y();
-        } else if keyboard.is_pressed(VirtualKeyCode::E) {
-            camera.position += speed * Vector3::unit_y();
-        }
+        camera_keyboard_movement(&mut camera, &keyboard, delta);
 
         // Schedule a redraw
         let next_frame_time = std::time::Instant::now()
@@ -183,27 +267,10 @@ fn main()
                 },
 
                 glutin::event::WindowEvent::CursorMoved { position, .. } => {
-                    let x : f32 = position.x as f32;
-                    let y : f32 = position.y as f32;
-
-                    if mouse_cursor.drag {
-                        let dx : f32 = x - mouse_cursor.x;
-                        let dy : f32 = y - mouse_cursor.y;
-
-                        let sensitivity = mouse_cursor.sensitivity;
-
-                        camera.yaw += Rad(dx * sensitivity);
-                        camera.pitch -= Rad(dy * sensitivity);
-
-                        if camera.pitch > Rad(SAFE_FRAC_PI_2) {
-                            camera.pitch = Rad(SAFE_FRAC_PI_2);
-                        } else if camera.pitch < Rad(-SAFE_FRAC_PI_2) {
-                            camera.pitch = Rad(-SAFE_FRAC_PI_2);
-                        }
-                    } 
-
-                    mouse_cursor.x = x;
-                    mouse_cursor.y = y;
+                    camera_mouse_movement(
+                        &mut camera, &mut mouse_cursor,
+                        (position.x as f32, position.y as f32)
+                    );
                 },
 
                 // Other events
