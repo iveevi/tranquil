@@ -88,6 +88,8 @@ void set_vec3(unsigned int program, const char *name, const glm::vec3 &vec)
 	glUniform3fv(i, 1, glm::value_ptr(vec));
 }
 
+static bool dragging = false;
+
 void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 {
 	static double last_x = WIDTH/2.0;
@@ -118,16 +120,27 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 	xoffset *= sensitivity;
 	yoffset *= sensitivity;
 
-	yaw += xoffset;
-	pitch += yoffset;
+	// Only drag when left mouse button is pressed
+	if (dragging) {
+		yaw += xoffset;
+		pitch += yoffset;
 
-	// Clamp pitch
-	if (pitch > 89.0f)
-		pitch = 89.0f;
-	if (pitch < -89.0f)
-		pitch = -89.0f;
+		// Clamp pitch
+		if (pitch > 89.0f)
+			pitch = 89.0f;
+		if (pitch < -89.0f)
+			pitch = -89.0f;
+	}
 
 	camera.set_yaw_pitch(yaw, pitch);
+}
+
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+{
+	if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
+		dragging = true;
+	else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
+		dragging = false;
 }
 
 GLFWwindow *initialize_graphics()
@@ -156,6 +169,7 @@ GLFWwindow *initialize_graphics()
 
 	// Set up callbacks
 	glfwSetCursorPosCallback(window, mouse_callback);
+	glfwSetMouseButtonCallback(window, mouse_button_callback);
 
 	const GLubyte* renderer = glGetString(GL_RENDERER);
 
