@@ -483,6 +483,7 @@ extern Shaders *shaders;
 
 // State for the application
 struct State {
+	bool paused = false;
 	bool show_clouds = true;
 	bool show_grass = true;
 	bool show_grass_blades = false;

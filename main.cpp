@@ -193,6 +193,7 @@ int main()
 	}; */
 
 	glm::vec2 water_offset {0, 0};
+
 	while (!glfwWindowShouldClose(window)) {
 		// TODO: frame.cpp
 		// Close if escape or q
@@ -240,7 +241,7 @@ int main()
 		// Update cloud density every so often
 		cloud_time += dt;
 
-		if (cloud_time > 0.01f) {
+		if (cloud_time > 0.01f && !state.paused) {
 			cloud_time = 0;
 
 			cloud_offset += 0.005f;
@@ -285,15 +286,15 @@ int main()
 			wind_velocity += wind_acceleration * dt * 25.0f;
 			// wind_velocity = glm::clamp(wind_velocity, -1.0f, 1.0f);
 			heightmap.update_wind(wind_velocity);
+
+			// Update sun direction, should lie on the x = z plane
+			float st = sun_time;
+			float y = glm::sin(st);
+			float x = glm::cos(st);
+
+			set_vec3(shaders->pixelizer, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
+			sun_time = std::fmod(sun_time + dt/25.0f, 2 * glm::pi <float> ());
 		}
-
-		// Update sun direction, should lie on the x = z plane
-		float st = sun_time;
-		float y = glm::sin(st);
-		float x = glm::cos(st);
-
-		set_vec3(shaders->pixelizer, "light_dir", glm::normalize(glm::vec3 {x, y, x}));
-		sun_time = std::fmod(sun_time + dt/25.0f, 2 * glm::pi <float> ());
 
 		// Ray tracing
 		{

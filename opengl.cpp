@@ -143,6 +143,12 @@ void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 		dragging = false;
 }
 
+void keyboard_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+	if (key == GLFW_KEY_P && action == GLFW_PRESS)
+		state.paused = !state.paused;
+}
+
 GLFWwindow *initialize_graphics()
 {
 	// Basic window
@@ -170,6 +176,7 @@ GLFWwindow *initialize_graphics()
 	// Set up callbacks
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
+	glfwSetKeyCallback(window, keyboard_callback);
 
 	const GLubyte* renderer = glGetString(GL_RENDERER);
 
