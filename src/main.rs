@@ -88,6 +88,41 @@ fn camera_mouse_movement(camera: &mut Camera, state: &mut MouseState, position: 
 }
 
 fn main() {
+    use noise::{NoiseFn, Perlin, Fbm};
+
+    let perlin = Perlin::new(0);
+    let fbm : Fbm <Perlin> = Fbm::new(0);
+
+    // Save to file...
+    let n = 1024;
+    let mut data : Vec <u8> = Vec::with_capacity(n * n);
+
+    let freq = 32.0;
+    for i in 0..n {
+        for j in 0..n {
+            let x = freq * (i as f64 / n as f64);
+            let y = freq * (j as f64 / n as f64);
+
+            let value = fbm.get([x, y]);
+
+            let value = (value + 1.0) / 2.0;
+
+            let value = (value * 255.0) as u8;
+
+            data.push(value);
+        }
+    }
+
+    println!("Saving to file, data = {:?}", data);
+
+    // Save as image
+    use image::ImageBuffer;
+
+    let img : ImageBuffer <image::Luma<u8>, _> = ImageBuffer::from_vec(n as u32, n as u32, data).unwrap();
+    img.save("perlin.png").unwrap();
+
+    return;
+
     let mut camera = Camera::new();
 
     // Read vertex and fragment shaders
