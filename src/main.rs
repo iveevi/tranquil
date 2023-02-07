@@ -10,6 +10,7 @@ mod io;
 mod transform;
 
 use camera::*;
+use glium::texture::Texture2dDataSink;
 use io::*;
 use transform::*;
 
@@ -88,7 +89,7 @@ fn camera_mouse_movement(camera: &mut Camera, state: &mut MouseState, position: 
 }
 
 fn main() {
-    use noise::{NoiseFn, Perlin, Fbm};
+    /* use noise::{NoiseFn, Perlin, Fbm};
 
     let perlin = Perlin::new(0);
     let fbm : Fbm <Perlin> = Fbm::new(0);
@@ -121,16 +122,9 @@ fn main() {
     let img : ImageBuffer <image::Luma<u8>, _> = ImageBuffer::from_vec(n as u32, n as u32, data).unwrap();
     img.save("perlin.png").unwrap();
 
-    return;
+    return; */
 
     let mut camera = Camera::new();
-
-    // Read vertex and fragment shaders
-    let vertex_shader_src = fs::read_to_string("src/base.vert")
-        .expect("Failed to read vertex shader");
-
-    let fragment_shader_src = fs::read_to_string("src/base.frag")
-        .expect("Failed to read fragment shader");
 
     // Setup Glium
     use glium::{glutin, Surface};
@@ -143,23 +137,13 @@ fn main() {
     // Event handlers
     let mut keyboard = Keyboard::new();
     
-    // Testing mesh
-    let vertex1 = Vertex { position: [-0.5, -0.5, 0.0] };
-    let vertex2 = Vertex { position: [ 0.0,  0.5, 0.0] };
-    let vertex3 = Vertex { position: [ 0.5, -0.25, 0.0] };
+    // Testing mesh (square)
+    let vertex1 = Vertex { position: [-10.0, 0.0, -10.0] };
+    let vertex2 = Vertex { position: [ 10.0, 0.0, -10.0] };
+    let vertex3 = Vertex { position: [ 10.0, 0.0,  10.0] };
+    let vertex4 = Vertex { position: [-10.0, 0.0,  10.0] };
 
-    let mut shape = vec![vertex1, vertex2, vertex3];
-
-    // Add offset triangles
-    for i in 0..10 {
-        let vertex1 = Vertex { position: [-0.5, -0.5, -i as f32] };
-        let vertex2 = Vertex { position: [ 0.0,  0.5, -i as f32] };
-        let vertex3 = Vertex { position: [ 0.5, -0.25, -i as f32] };
-
-        shape.push(vertex1);
-        shape.push(vertex2);
-        shape.push(vertex3);
-    }
+    let mut shape = vec![vertex1, vertex2, vertex3, vertex1, vertex3, vertex4];
 
     let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
     let indices = glium::index::NoIndices(
@@ -168,50 +152,33 @@ fn main() {
         }
     );
 
+    // Load textures
+    let path = "perlin.png";
+
+    let image = image::open(path).unwrap().into_luma8();
+    let image_dimensions = image.dimensions();
+    let raw_image : Vec <u8> = image.into_raw();
+
+    // CoW
+    use std::borrow::Cow;
+
+    let texture = glium::texture::RawImage2d::from_raw(
+        Cow::Owned(raw_image),
+        image_dimensions.0,
+        image_dimensions.1,
+    );
+
+    let texture = glium::texture::Texture2d::new(&display, texture).unwrap();
+
     // Load shaders
     let program = glium::Program::new(
         &display,
         glium::program::SourceCode {
-            vertex_shader: &vertex_shader_src,
-            tessellation_control_shader: Some("
-                #version 450
-
-                layout (vertices = 3) out;
-
-                uniform int tess_level = 10;
-
-                void main() {
-                    gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
-
-                    gl_TessLevelOuter[0] = tess_level;
-                    gl_TessLevelOuter[1] = tess_level;
-                    gl_TessLevelOuter[2] = tess_level;
-                    gl_TessLevelInner[0] = tess_level;
-                }
-            "),
-            tessellation_evaluation_shader: Some("
-                #version 450
-
-                layout (triangles, equal_spacing, ccw) in;
-
-                uniform mat4 view;
-                uniform mat4 projection;
-
-                out vec3 fpos;
-
-                void main() {
-                    vec4 p0 = gl_TessCoord.x * gl_in[0].gl_Position;
-                    vec4 p1 = gl_TessCoord.y * gl_in[1].gl_Position;
-                    vec4 p2 = gl_TessCoord.z * gl_in[2].gl_Position;
-
-                    vec4 pos = p0 + p1 + p2;
-
-                    gl_Position = projection * view * pos;
-                    fpos = pos.xyz;
-                }
-            "),
+            vertex_shader: &fs::read_to_string("src/base.vert").unwrap(),
+            tessellation_control_shader: Some(&fs::read_to_string("src/heightmap.tcs").unwrap()),
+            tessellation_evaluation_shader: Some(&fs::read_to_string("src/heightmap.tes").unwrap()),
             geometry_shader: None,
-            fragment_shader: &fragment_shader_src,
+            fragment_shader: &fs::read_to_string("src/base.frag").unwrap(),
         }
     ).unwrap();
 
@@ -235,16 +202,8 @@ fn main() {
         let mut target = display.draw();
         target.clear_color_and_depth((0.0, 0.0, 0.0, 1.0), 1.0);
 
-        // Transforming the objetcs
-        let mut t = Transform::new();
-        let time = epoch.elapsed().as_secs_f32();
-
-        t.rotation.y = time * 50.0;
-        t.rotation.x = time * 30.0;
-        t.rotation.z = time * 10.0;
-
         // Drawing
-        let model: [[f32; 4]; 4] = t.matrix().into();
+        let model: [[f32; 4]; 4] = Transform::new().matrix().into();
         let view: [[f32; 4]; 4] = camera.view().into();
         let perspective: [[f32; 4]; 4] = camera.perspective().into();
 
@@ -252,6 +211,7 @@ fn main() {
             model: model,
             view: view,
             projection: perspective,
+            heightmap: &texture
         };
 
         let params = glium::DrawParameters {
@@ -260,7 +220,7 @@ fn main() {
                 write: true,
                 ..Default::default()
             },
-            polygon_mode: glium::draw_parameters::PolygonMode::Line,
+            polygon_mode: glium::draw_parameters::PolygonMode::Fill,
             ..Default::default()
         };
 
