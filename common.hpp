@@ -444,7 +444,7 @@ struct Shaders {
 	// Construction
 	Shaders() {
 		// Pixelizer
-		unsigned int shader = compile_shader("shaders/pixelizer.glsl", GL_COMPUTE_SHADER);
+		unsigned int shader = compile_shader("../shaders/pixelizer.glsl", GL_COMPUTE_SHADER);
 
 		pixelizer = glCreateProgram();
 		glAttachShader(pixelizer, shader);
@@ -454,8 +454,8 @@ struct Shaders {
 			throw std::runtime_error("Failed to link pixelizer shaders.pixelizer");
 
 		// Texturizer
-		unsigned int vertex_shader = compile_shader("shaders/texture.vert", GL_VERTEX_SHADER);
-		unsigned int fragment_shader = compile_shader("shaders/texture.frag", GL_FRAGMENT_SHADER);
+		unsigned int vertex_shader = compile_shader("../shaders/texture.vert", GL_VERTEX_SHADER);
+		unsigned int fragment_shader = compile_shader("../shaders/texture.frag", GL_FRAGMENT_SHADER);
 
 		// Create shaders.pixelizer
 		texturizer = glCreateProgram();
@@ -779,7 +779,7 @@ public:
 		int width, height;
 
 		unsigned char *water_n1 = stbi_load(
-			"./water_normal1.jpg",
+			"../water_normal1.jpg",
 			&width, &height,
 			nullptr, STBI_rgb_alpha
 		);
@@ -800,7 +800,7 @@ public:
 		glBindImageTexture(7, t_water_normal1, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA);
 
 		unsigned char *water_n2 = stbi_load(
-			"./water_normal2.jpeg",
+			"../water_normal2.jpeg",
 			&width, &height,
 			nullptr, STBI_rgb_alpha
 		);

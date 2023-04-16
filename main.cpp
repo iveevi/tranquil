@@ -337,7 +337,8 @@ int main()
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo_indices);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, ssbo_bvh);
 
-			glDispatchCompute(BATCH_SIZE/PIXEL_SIZE, BATCH_SIZE/PIXEL_SIZE, 1);
+                        int size = BATCH_SIZE/(16 * PIXEL_SIZE);
+			glDispatchCompute(size, size, 1);
 
 			// Update offsets
 			offx += BATCH_SIZE;
@@ -415,6 +416,7 @@ int main()
 			{
 				ImGui::Begin("Info");
 				ImGui::Text("frametime: %.1f ms", 1000.0f/ImGui::GetIO().Framerate);
+                                ImGui::Text("framerate: %.1f fps", ImGui::GetIO().Framerate);
 				ImGui::Text("primitives: %lu", tile.triangles.size());
 				ImGui::End();
 			}
